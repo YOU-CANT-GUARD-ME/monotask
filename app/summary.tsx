@@ -1,5 +1,5 @@
 // app/summary.tsx
-import { Ionicons } from "@expo/vector-icons";
+import AppIcon from "../components/AppIcon";
 import * as ImageManipulator from "expo-image-manipulator";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -16,6 +16,7 @@ import {
   TouchableWithoutFeedback,
   useWindowDimensions,
   View,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -119,7 +120,7 @@ async function fetchAiSummary(
   photoUris: string[]
 ): Promise<string> {
   const OPENAI_API_KEY =
-    "OPENAI_API_KEY_REMOVED";
+    "REMOVED_OPENAI_KEY";
 
   const hasPhotos = photoUris.length > 0;
 
@@ -320,7 +321,7 @@ function SaveToast({
             padding: rs(7),
           }}
         >
-          <Ionicons name="checkmark" size={rs(14)} color="#fff" />
+          <AppIcon name="checkmark" size={rs(14)} color="#fff" />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ color: "#fff", fontWeight: "700", fontSize: rs(13) }}>
@@ -388,18 +389,22 @@ export default function SummaryScreen() {
 
     fetchAiSummary(noteText, photoUris)
       .then(async (summary) => {
+        // If the screen was cancelled *before* the AI response came back, stop.
         if (cancelled.value) return;
+        
         setAiSummary(summary);
         setAiLoading(false);
 
-        // Upload all photos in parallel — returns array of permanent URLs
+        // Upload all photos in parallel
         let uploadedUrls: string[] = [];
         if (photoUris.length > 0) {
           uploadedUrls = await uploadPhotos(photoUris, sessionId);
         }
-        if (cancelled.value) return;
 
-        saveSession({
+        // Fix: Removed the secondary 'if (cancelled.value) return;' check.
+        // We always execute the save routine below so the PWA background 
+        // operation completes properly even if UI states switch.
+        return saveSession({
           id: sessionId,
           startTime: new Date(startTime).getTime(),
           durationMs,
@@ -407,17 +412,17 @@ export default function SummaryScreen() {
           aiSummary: summary || "",
           subject: subject || "기타",
           photoUris: uploadedUrls,
-        })
-          .then(() => {
-            if (!cancelled.value) setToastVisible(true);
-          })
-          .catch((error) => {
-            console.log("Failed to save session:", error);
-          });
+        });
+      })
+      .then(() => {
+        // Only update UI elements if the screen context is still alive
+        if (!cancelled.value) {
+          setToastVisible(true);
+        }
       })
       .catch((err) => {
         if (!cancelled.value) {
-          setAiError(err.message ?? "Unknown error");
+          setAiError(err?.message ?? "Unknown error");
           setAiLoading(false);
         }
       });
@@ -617,7 +622,9 @@ export default function SummaryScreen() {
   });
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe}
+      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+    >
       <ScrollView
         style={s.bg}
         contentContainerStyle={s.scroll}
@@ -625,7 +632,7 @@ export default function SummaryScreen() {
       >
         <View style={s.topSection}>
           <View style={s.badgeCircle}>
-            <Ionicons name="sparkles" size={rs(32)} color={colors.onPrimary} />
+            <AppIcon name="sparkles" size={rs(32)} color={colors.onPrimary} />
           </View>
           <Text style={s.title}>정리 완료!</Text>
           <Text style={s.sub}>오늘의 학습을 깔끔하게 정리했어요</Text>
@@ -670,7 +677,7 @@ export default function SummaryScreen() {
         <Text style={s.sectionLabel}>AI 요약</Text>
         <View style={s.aiCard}>
           <View style={s.aiHeader}>
-            <Ionicons name="sparkles" size={rs(13)} color={colors.primary} />
+            <AppIcon name="sparkles" size={rs(13)} color={colors.primary} />
             <Text style={s.aiTitle}>Study Summary</Text>
           </View>
 
@@ -688,7 +695,7 @@ export default function SummaryScreen() {
               <Text style={s.aiErrorText}>요약 생성 실패:</Text>
               <Text style={s.aiErrorText}>{aiError}</Text>
               <TouchableOpacity style={s.retryBtn} onPress={handleRetry}>
-                <Ionicons name="refresh-outline" size={rs(14)} color={colors.primary} />
+                <AppIcon name="refresh-outline" size={rs(14)} color={colors.primary} />
                 <Text style={s.retryBtnText}>다시 시도</Text>
               </TouchableOpacity>
             </>
@@ -708,7 +715,7 @@ export default function SummaryScreen() {
             }}
             activeOpacity={0.85}
           >
-            <Ionicons name="home-outline" size={rs(16)} color={colors.text} />
+            <AppIcon name="home-outline" size={rs(16)} color={colors.text} />
             <Text style={s.homeBtnText}>홈</Text>
           </TouchableOpacity>
 
@@ -722,7 +729,7 @@ export default function SummaryScreen() {
             }}
             activeOpacity={0.85}
           >
-            <Ionicons name="time-outline" size={rs(16)} color={colors.onPrimary} />
+            <AppIcon name="time-outline" size={rs(16)} color={colors.onPrimary} />
             <Text style={s.historyBtnText}>학습 기록 보기</Text>
           </TouchableOpacity>
         </View>
@@ -751,7 +758,7 @@ export default function SummaryScreen() {
               style={s.modalCloseBtn}
               onPress={() => setPreviewIdx(null)}
             >
-              <Ionicons name="close" size={22} color="#fff" />
+              <AppIcon name="close" size={22} color="#fff" />
             </TouchableOpacity>
             <TouchableWithoutFeedback>
               {previewIdx !== null && photoUris[previewIdx] ? (

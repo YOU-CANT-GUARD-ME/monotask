@@ -41,3 +41,16 @@ app-example
 # generated native folders
 /ios
 /android
+.vercel
+serviceAccountKey.json
+
+# Secrets
+.env
+.env.*
+serviceAccountKey.json
+*.pem
+*.key
+
+# Vercel / local
+.vercel
+dist

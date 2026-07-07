@@ -1,5 +1,5 @@
 // app/study-end.tsx
-import { Ionicons } from "@expo/vector-icons";
+import AppIcon from "../components/AppIcon";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -14,6 +14,7 @@ import {
   TouchableWithoutFeedback,
   useWindowDimensions,
   View,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "../contexts/ThemeContext";
@@ -405,7 +406,9 @@ export default function StudyEndScreen() {
   // ───── Screen: "end" ───────────────────────────────────────────────────
   if (screen === "end") {
     return (
-      <SafeAreaView style={s.safe}>
+      <SafeAreaView style={s.safe}
+      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+    >
         <ScrollView
           style={s.bg}
           contentContainerStyle={s.endScroll}
@@ -413,7 +416,7 @@ export default function StudyEndScreen() {
         >
           <View style={s.topSection}>
             <View style={s.badgeCircle}>
-              <Ionicons name="checkmark" size={rs(36)} color={colors.onPrimary} />
+              <AppIcon name="checkmark" size={rs(36)} color={colors.onPrimary} />
             </View>
             <Text style={s.endTitle}>공부 완료!</Text>
             <Text style={s.endSub}>오늘도 수고했어요{"\n"}잘 정리해볼까요?</Text>
@@ -438,7 +441,7 @@ export default function StudyEndScreen() {
               onPress={() => setScreen("note")}
               activeOpacity={0.85}
             >
-              <Ionicons name="book-outline" size={rs(26)} color={colors.onPrimary} />
+              <AppIcon name="book-outline" size={rs(26)} color={colors.onPrimary} />
               <Text style={[s.choiceBtnLabel, s.choiceBtnLabelPrimary]}>정리하기</Text>
               <Text style={[s.choiceBtnDesc, s.choiceBtnDescPrimary]}>
                 복습 노트 & AI 요약
@@ -449,7 +452,7 @@ export default function StudyEndScreen() {
               onPress={() => setScreen("later")}
               activeOpacity={0.85}
             >
-              <Ionicons name="time-outline" size={rs(26)} color={colors.textMuted} />
+              <AppIcon name="time-outline" size={rs(26)} color={colors.textMuted} />
               <Text style={s.choiceBtnLabel}>나중에 하기</Text>
               <Text style={s.choiceBtnDesc}>알림으로 나중에 안내</Text>
             </TouchableOpacity>
@@ -466,11 +469,13 @@ export default function StudyEndScreen() {
   // ───── Screen: "later" ─────────────────────────────────────────────────
   if (screen === "later") {
     return (
-      <SafeAreaView style={s.safe}>
+      <SafeAreaView style={s.safe}
+      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+    >
         <View style={s.bg}>
           <View style={s.laterWrap}>
             <View style={s.laterBadge}>
-              <Ionicons name="notifications-outline" size={rs(32)} color={colors.textMuted} />
+              <AppIcon name="notifications-outline" size={rs(32)} color={colors.textMuted} />
             </View>
             <Text style={s.laterTitle}>알겠어요, 나중에 할게요</Text>
             <Text style={s.laterSub}>
@@ -500,7 +505,9 @@ export default function StudyEndScreen() {
 
   // ───── Screen: "note" ──────────────────────────────────────────────────
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe}
+      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+    >
       <ScrollView
         style={s.bg}
         contentContainerStyle={s.noteScroll}
@@ -508,7 +515,7 @@ export default function StudyEndScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <TouchableOpacity style={s.backBtn} onPress={() => setScreen("end")}>
-          <Ionicons name="chevron-back" size={rs(16)} color={colors.primary} />
+          <AppIcon name="chevron-back" size={rs(16)} color={colors.primary} />
           <Text style={s.backText}>뒤로</Text>
         </TouchableOpacity>
 
@@ -548,7 +555,7 @@ export default function StudyEndScreen() {
                 style={s.photoDeleteBtn}
                 activeOpacity={0.75}
               >
-                <Ionicons name="close" size={rs(14)} color="#fff" />
+                <AppIcon name="close" size={rs(14)} color="#fff" />
               </TouchableOpacity>
             </View>
           ))}
@@ -559,7 +566,7 @@ export default function StudyEndScreen() {
               onPress={openCamera}
               activeOpacity={0.75}
             >
-              <Ionicons name="add" size={rs(28)} color={colors.textFaint} />
+              <AppIcon name="add" size={rs(28)} color={colors.textFaint} />
               <Text style={s.addPhotoText}>사진 추가</Text>
             </TouchableOpacity>
           )}
@@ -600,7 +607,7 @@ export default function StudyEndScreen() {
               style={s.modalCloseBtn}
               onPress={() => setPreviewIdx(null)}
             >
-              <Ionicons name="close" size={22} color="#fff" />
+              <AppIcon name="close" size={22} color="#fff" />
             </TouchableOpacity>
             <TouchableWithoutFeedback>
               {previewIdx !== null && photoUris[previewIdx] ? (

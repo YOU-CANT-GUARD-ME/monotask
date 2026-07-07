@@ -1,0 +1,7 @@
+.env
+.env.*
+serviceAccountKey.json
+*.pem
+*.key
+.git
+node_modules

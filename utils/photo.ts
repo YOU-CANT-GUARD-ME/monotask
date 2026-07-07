@@ -1,56 +1,58 @@
-// utils/photos.ts
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import { auth, storage } from "../firebase";
+// utils/photo.ts
+import * as ImageManipulator from "expo-image-manipulator";
 
-/**
- * Uploads a local photo (file:// URI) to Firebase Storage under the current
- * user's folder and returns a permanent https download URL.
- *
- * If the uri is already an https URL (i.e. already uploaded), it's returned
- * as-is. If there's no logged-in user or no uri, returns the original uri.
- */
 export async function uploadPhoto(
   localUri: string,
   sessionId: string
 ): Promise<string> {
   if (!localUri) return "";
 
-  // Already a remote URL — nothing to upload
   if (localUri.startsWith("http://") || localUri.startsWith("https://")) {
     return localUri;
   }
 
-  const user = auth.currentUser;
-  if (!user) {
-    console.warn("uploadPhoto: no logged-in user, keeping local uri");
+  if (localUri.startsWith("data:")) {
     return localUri;
   }
 
   try {
-    // Fetch the local file as a blob
-    const response = await fetch(localUri);
-    const blob = await response.blob();
+    const manipulated = await ImageManipulator.manipulateAsync(
+      localUri,
+      [{ resize: { width: 400 } }], // smaller width
+      {
+        compress: 0.4, // more aggressive compression
+        format: ImageManipulator.SaveFormat.JPEG,
+        base64: true,
+      }
+    );
 
-    // Derive a file extension from the uri
-    const ext = localUri.split(".").pop()?.toLowerCase() || "jpg";
-    const path = `users/${user.uid}/sessions/${sessionId}.${ext}`;
+    if (!manipulated.base64) {
+      console.warn("uploadPhoto: no base64 returned");
+      return localUri;
+    }
 
-    const storageRef = ref(storage, path);
-    await uploadBytes(storageRef, blob);
+    // Check size — if still too large, compress further
+    const base64 = manipulated.base64;
+    const sizeKB = (base64.length * 3) / 4 / 1024;
+    console.log(`Photo size: ${Math.round(sizeKB)}KB`);
 
-    const downloadUrl = await getDownloadURL(storageRef);
-    return downloadUrl;
+    if (sizeKB > 200) {
+      // Try again with even more compression
+      const smaller = await ImageManipulator.manipulateAsync(
+        localUri,
+        [{ resize: { width: 300 } }],
+        { compress: 0.3, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      );
+      return `data:image/jpeg;base64,${smaller.base64}`;
+    }
+
+    return `data:image/jpeg;base64,${base64}`;
   } catch (e) {
-    console.warn("uploadPhoto failed, keeping local uri:", e);
-    // Fall back to local uri so the session still saves
+    console.warn("uploadPhoto failed:", e);
     return localUri;
   }
 }
 
-/**
- * Uploads multiple photos in parallel. Returns an array of URLs (or local URIs
- * on failure). Order is preserved.
- */
 export async function uploadPhotos(
   localUris: string[],
   sessionId: string

@@ -44,7 +44,9 @@ export type QuizAttempt = {
 };
 
 function getUid() {
-  return auth.currentUser?.uid ?? null;
+  const uid = auth.currentUser?.uid ?? null;
+  console.log("CURRENT UID:", uid);
+  return uid;
 }
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────

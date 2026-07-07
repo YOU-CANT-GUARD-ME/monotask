@@ -1,5 +1,5 @@
 // app/profile.tsx
-import { FontAwesome, Ionicons } from "@expo/vector-icons";
+import AppIcon from "../components/AppIcon";
 import { useFocusEffect, useRouter } from "expo-router";
 import {
   createUserWithEmailAndPassword,
@@ -46,6 +46,10 @@ import {
 import { useTheme } from "../contexts/ThemeContext";
 import { auth } from "../firebase";
 import { getSessions, Session } from "../utils/storage";
+
+const MONOTASK_API_BASE_URL =
+  Platform.OS === "web" ? "" : "https://monotask-lock-in.vercel.app";
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -252,7 +256,7 @@ function LoggedOut({
   return (
     <View style={s.wrap}>
       <View style={s.iconCircle}>
-        <Ionicons name="person-outline" size={rs(34)} color={colors.textFaint} />
+        <AppIcon name="person-outline" size={rs(34)} color={colors.textFaint} />
       </View>
       <Text style={s.title}>로그인이 필요해요</Text>
       <Text style={s.sub}>
@@ -288,16 +292,20 @@ function LoginModal({
   const [isSignup, setIsSignup] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!visible) {
+    if (visible) {
+      setIsSignup(initialIsSignup);
+    } else {
       setEmail("");
       setPassword("");
       setError(null);
+      setMessage(null);
       setIsSignup(false);
       setLoading(false);
     }
-  }, [visible]);
+  }, [visible, initialIsSignup]);
 
   const cleanEmail = email.trim();
   const cleanPassword = password.trim();
@@ -310,6 +318,7 @@ function LoginModal({
       "auth/user-not-found": "존재하지 않는 계정입니다.",
       "auth/wrong-password": "비밀번호가 틀렸습니다.",
       "auth/weak-password": "비밀번호는 6자 이상이어야 합니다.",
+      "auth/too-many-requests": "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
     };
     return map[code] ?? "오류가 발생했습니다.";
   };
@@ -318,11 +327,52 @@ function LoginModal({
     if (!isValid) return;
     setLoading(true);
     setError(null);
+    setMessage(null);
     try {
       if (isSignup)
         await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
       else await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
       onClose();
+    } catch (e: any) {
+      setError(getErrorMsg(e.code));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    if (isSignup) return;
+
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      setMessage(null);
+      setError("비밀번호를 재설정할 이메일을 입력해주세요.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`${MONOTASK_API_BASE_URL}/api/request-password-reset`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: cleanEmail }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data?.error === "string"
+            ? data.error
+            : "비밀번호 재설정 이메일을 보내지 못했습니다."
+        );
+      }
+      setPassword("");
+      setMessage("비밀번호 재설정 이메일을 보냈습니다. 메일함을 확인해주세요.");
     } catch (e: any) {
       setError(getErrorMsg(e.code));
     } finally {
@@ -346,7 +396,7 @@ function LoginModal({
         onPress={onClose}
         style={{ position: "absolute", top: rs(16), right: rs(20), zIndex: 1 }}
       >
-        <Ionicons name="close" size={rs(22)} color={colors.textFaint} />
+        <AppIcon name="close" size={rs(22)} color={colors.textFaint} />
       </TouchableOpacity>
       <Text
         style={{
@@ -371,6 +421,7 @@ function LoginModal({
         onChangeText={(t) => {
           setEmail(t);
           setError(null);
+          setMessage(null);
         }}
         autoCapitalize="none"
         keyboardType="email-address"
@@ -383,6 +434,7 @@ function LoginModal({
         onChangeText={(t) => {
           setPassword(t);
           setError(null);
+          setMessage(null);
         }}
         secureTextEntry
       />
@@ -396,6 +448,20 @@ function LoginModal({
           }}
         >
           {error}
+        </Text>
+      )}
+
+      {message && (
+        <Text
+          style={{
+            color: colors.primary,
+            fontSize: rs(12),
+            textAlign: "center",
+            marginBottom: rs(8),
+            lineHeight: rs(18),
+          }}
+        >
+          {message}
         </Text>
       )}
       <TouchableOpacity
@@ -414,8 +480,25 @@ function LoginModal({
           {loading ? "..." : isSignup ? "회원가입하기" : "로그인하기"}
         </Text>
       </TouchableOpacity>
+      {!isSignup && (
+        <TouchableOpacity
+          onPress={handlePasswordReset}
+          disabled={loading}
+          style={{ alignItems: "center", marginTop: rs(14) }}
+          activeOpacity={0.8}
+        >
+          <Text style={{ fontSize: rs(13), color: colors.primary, fontWeight: "700" }}>
+            비밀번호를 잊으셨나요?
+          </Text>
+        </TouchableOpacity>
+      )}
+
       <TouchableOpacity
-        onPress={() => setIsSignup(!isSignup)}
+        onPress={() => {
+          setIsSignup(!isSignup);
+          setError(null);
+          setMessage(null);
+        }}
         style={{ alignItems: "center", marginTop: rs(14) }}
       >
         <Text style={{ fontSize: rs(13), color: colors.textMuted }}>
@@ -470,7 +553,7 @@ function EditProfileModal({
         onPress={onClose}
         style={{ position: "absolute", top: rs(16), right: rs(20), zIndex: 1 }}
       >
-        <Ionicons name="close" size={rs(22)} color={colors.textFaint} />
+        <AppIcon name="close" size={rs(22)} color={colors.textFaint} />
       </TouchableOpacity>
       <Text
         style={{
@@ -584,6 +667,7 @@ function ChangePasswordModal({
     }
   };
 
+
   const inputStyle = {
     backgroundColor: colors.surface,
     borderRadius: rs(14),
@@ -606,7 +690,7 @@ function ChangePasswordModal({
         onPress={onClose}
         style={{ position: "absolute", top: rs(16), right: rs(20), zIndex: 1 }}
       >
-        <Ionicons name="close" size={rs(22)} color={colors.textFaint} />
+        <AppIcon name="close" size={rs(22)} color={colors.textFaint} />
       </TouchableOpacity>
       <Text
         style={{
@@ -740,7 +824,7 @@ function NotificationsModal({
         onPress={onClose}
         style={{ position: "absolute", top: rs(16), right: rs(20), zIndex: 1 }}
       >
-        <Ionicons name="close" size={rs(22)} color={colors.textFaint} />
+        <AppIcon name="close" size={rs(22)} color={colors.textFaint} />
       </TouchableOpacity>
       <Text
         style={{
@@ -815,7 +899,7 @@ function ThemeModal({
         onPress={onClose}
         style={{ position: "absolute", top: rs(16), right: rs(20), zIndex: 1 }}
       >
-        <Ionicons name="close" size={rs(22)} color={colors.textFaint} />
+        <AppIcon name="close" size={rs(22)} color={colors.textFaint} />
       </TouchableOpacity>
       <Text
         style={{
@@ -862,7 +946,7 @@ function ThemeModal({
                   backgroundColor: selected ? colors.bg : "transparent",
                 }}
               >
-                <Ionicons
+                <AppIcon
                   name={m.icon}
                   size={rs(14)}
                   color={selected ? colors.primary : colors.textFaint}
@@ -948,7 +1032,7 @@ function ThemeModal({
                         justifyContent: "center",
                       }}
                     >
-                      <Ionicons
+                      <AppIcon
                         name="checkmark"
                         size={rs(13)}
                         color={preview.onPrimary}
@@ -1005,7 +1089,7 @@ function StatPill({
         gap: 4,
       }}
     >
-      <FontAwesome
+      <AppIcon
         name={icon as any}
         size={rs(14)}
         color={green ? "rgba(244,241,234,0.85)" : colors.primary}
@@ -1064,7 +1148,7 @@ function MenuRow({
         borderBottomColor: colors.borderSoft,
       }}
     >
-      <FontAwesome
+      <AppIcon
         name={icon as any}
         size={rs(15)}
         color={destructive ? colors.danger : colors.primary}
@@ -1081,7 +1165,7 @@ function MenuRow({
         {label}
       </Text>
       {!destructive && (
-        <Ionicons name="chevron-forward" size={rs(14)} color={colors.border} />
+        <AppIcon name="chevron-forward" size={rs(14)} color={colors.border} />
       )}
     </TouchableOpacity>
   );
@@ -1219,12 +1303,14 @@ export default function ProfileScreen() {
   });
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe}
+      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+    >
       <View style={s.header}>
         <Text style={s.headerTitle}>프로필</Text>
         {user && (
           <TouchableOpacity onPress={() => signOut(auth)}>
-            <Ionicons name="log-out-outline" size={rs(20)} color={colors.textFaint} />
+            <AppIcon name="log-out-outline" size={rs(20)} color={colors.textFaint} />
           </TouchableOpacity>
         )}
       </View>
@@ -1347,7 +1433,6 @@ export default function ProfileScreen() {
           </View>
         </Animated.ScrollView>
       )}
-
       <LoginModal
         visible={activeModal === "login" || activeModal === "signup"}
         onClose={() => setActiveModal(null)}

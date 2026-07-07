@@ -1,9 +1,9 @@
 // app/focus.tsx
-import { FontAwesome } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Alert,
+  AppState,
   Animated,
   StyleSheet,
   Text,
@@ -15,15 +15,46 @@ import Svg, { Circle } from "react-native-svg";
 import { useTheme } from "../contexts/ThemeContext";
 import { saveSession } from "../utils/storage";
 
+const ACTIVE_FOCUS_SESSION_KEY = "monotask_active_focus_session_v1";
+const MAX_RESTORE_MS = 24 * 60 * 60 * 1000;
+
+type ActiveFocusSession = {
+  sessionId: string;
+  startTime: number;
+};
+
 function formatElapsed(ms: number): string {
-  const totalSecs = Math.floor(ms / 1000);
+  const safeMs = Math.max(0, ms);
+  const totalSecs = Math.floor(safeMs / 1000);
   const h = Math.floor(totalSecs / 3600);
   const m = Math.floor((totalSecs % 3600) / 60);
   const sec = totalSecs % 60;
+
   if (h > 0) {
     return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   }
+
   return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+function readActiveSession(raw: string | null): ActiveFocusSession | null {
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+
+    if (
+      typeof parsed?.sessionId === "string" &&
+      typeof parsed?.startTime === "number" &&
+      Number.isFinite(parsed.startTime)
+    ) {
+      return parsed;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function DndNudge({ rs }: { rs: (n: number) => number }) {
@@ -33,7 +64,11 @@ function DndNudge({ rs }: { rs: (n: number) => number }) {
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(opacity, { toValue: 1, duration: 350, useNativeDriver: true }),
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 350,
+        useNativeDriver: true,
+      }),
       Animated.spring(translateY, {
         toValue: 0,
         friction: 8,
@@ -41,7 +76,7 @@ function DndNudge({ rs }: { rs: (n: number) => number }) {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [opacity, translateY]);
 
   return (
     <Animated.View
@@ -70,7 +105,15 @@ function DndNudge({ rs }: { rs: (n: number) => number }) {
           flexShrink: 0,
         }}
       >
-        <FontAwesome name="bell-slash" size={rs(18)} color={colors.onPrimary} />
+        <Text
+          style={{
+            color: colors.onPrimary,
+            fontSize: rs(18),
+            fontWeight: "900",
+          }}
+        >
+          !
+        </Text>
       </View>
 
       <View style={{ flex: 1 }}>
@@ -85,7 +128,11 @@ function DndNudge({ rs }: { rs: (n: number) => number }) {
           방해 금지 모드를 켜세요
         </Text>
         <Text
-          style={{ fontSize: rs(11), color: colors.primaryDark, lineHeight: rs(17) }}
+          style={{
+            fontSize: rs(11),
+            color: colors.primaryDark,
+            lineHeight: rs(17),
+          }}
         >
           설정 → 집중 모드 → 방해 금지{"\n"}에서 활성화하면 더 집중할 수 있어요
         </Text>
@@ -96,47 +143,143 @@ function DndNudge({ rs }: { rs: (n: number) => number }) {
 
 export default function FocusScreen() {
   const { width } = useWindowDimensions();
-  const scale = width / 390;
-  const rs = (n: number) => Math.round(n * scale);
+  const safeWidth = width && width > 0 ? width : 390;
+  const scale = safeWidth / 390;
+  const rs = (n: number) => Math.max(1, Math.round(n * scale));
   const { colors } = useTheme();
 
   const router = useRouter();
-  const { sessionId } = useLocalSearchParams();
+  const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
+
+  const fallbackSessionId = useRef(Date.now().toString()).current;
+  const [restoredSessionId, setRestoredSessionId] = useState<string | null>(null);
+  const activeSessionId = String(sessionId || restoredSessionId || fallbackSessionId);
 
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
 
   const startTimeRef = useRef<number | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hasEndedRef = useRef(false);
 
-  useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    setElapsedMs(0);
-    startTimeRef.current = Date.now();
+  function syncElapsedFromClock() {
+    if (!startTimeRef.current) return;
+    setElapsedMs(Math.max(0, Date.now() - startTimeRef.current));
+  }
 
-    intervalRef.current = setInterval(() => {
-      if (startTimeRef.current) {
-        setElapsedMs(Date.now() - startTimeRef.current);
-      }
-    }, 1000);
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [sessionId]);
-
-  function goToStudyEnd() {
-    const capturedStartTime = startTimeRef.current ?? Date.now();
-
+  function stopTicker() {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+  }
 
-    const durationMs = Date.now() - capturedStartTime;
+  function startTicker() {
+    stopTicker();
+    syncElapsedFromClock();
+
+    intervalRef.current = setInterval(() => {
+      syncElapsedFromClock();
+    }, 1000);
+  }
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function setupFocusSession() {
+      stopTicker();
+      hasEndedRef.current = false;
+
+      const now = Date.now();
+      const raw = await AsyncStorage.getItem(ACTIVE_FOCUS_SESSION_KEY);
+      const saved = readActiveSession(raw);
+
+      const savedIsValid =
+        !!saved &&
+        saved.startTime > 0 &&
+        now >= saved.startTime &&
+        now - saved.startTime < MAX_RESTORE_MS;
+
+      const nextSessionId = String(
+        sessionId || (savedIsValid ? saved.sessionId : fallbackSessionId)
+      );
+
+      const nextStartTime =
+        savedIsValid && saved.sessionId === nextSessionId
+          ? saved.startTime
+          : now;
+
+      if (!mounted) return;
+
+      setRestoredSessionId(!sessionId && savedIsValid ? saved.sessionId : null);
+      startTimeRef.current = nextStartTime;
+      setElapsedMs(Math.max(0, Date.now() - nextStartTime));
+
+      await AsyncStorage.setItem(
+        ACTIVE_FOCUS_SESSION_KEY,
+        JSON.stringify({
+          sessionId: nextSessionId,
+          startTime: nextStartTime,
+        })
+      );
+
+      if (!mounted) return;
+      startTicker();
+    }
+
+    setupFocusSession();
+
+    return () => {
+      mounted = false;
+      stopTicker();
+    };
+  }, [sessionId]);
+
+  useEffect(() => {
+    const updateFromCurrentTime = () => {
+      syncElapsedFromClock();
+    };
+
+    const subscription = AppState.addEventListener("change", updateFromCurrentTime);
+
+    const maybeDocument =
+      typeof globalThis !== "undefined"
+        ? (globalThis as any).document
+        : undefined;
+
+    if (maybeDocument?.addEventListener) {
+      maybeDocument.addEventListener("visibilitychange", updateFromCurrentTime);
+    }
+
+    return () => {
+      subscription.remove();
+
+      if (maybeDocument?.removeEventListener) {
+        maybeDocument.removeEventListener("visibilitychange", updateFromCurrentTime);
+      }
+    };
+  }, []);
+
+  function goToStudyEnd() {
+    if (hasEndedRef.current) return;
+    hasEndedRef.current = true;
+
+    setShowEndConfirm(false);
+
+    const capturedStartTime = startTimeRef.current ?? Date.now();
+
+    stopTicker();
+
+    const durationMs = Math.max(0, Date.now() - capturedStartTime);
+
+    AsyncStorage.removeItem(ACTIVE_FOCUS_SESSION_KEY).catch((error) => {
+      console.log("Failed to clear active focus session:", error);
+    });
 
     router.replace({
       pathname: "/study-end",
       params: {
+        sessionId: activeSessionId,
         durationMs: String(durationMs),
         startTime: new Date(capturedStartTime).toISOString(),
       },
@@ -146,7 +289,7 @@ export default function FocusScreen() {
       try {
         if (durationMs > 10000) {
           await saveSession({
-            id: String(capturedStartTime),
+            id: activeSessionId,
             startTime: capturedStartTime,
             durationMs,
           });
@@ -158,20 +301,16 @@ export default function FocusScreen() {
   }
 
   function handleEnd() {
-    Alert.alert(
-      "세션 종료",
-      "집중 세션을 종료하시겠어요?",
-      [
-        { text: "계속하기", style: "cancel" },
-        { text: "종료", style: "destructive", onPress: goToStudyEnd },
-      ],
-      { cancelable: true }
-    );
+    setShowEndConfirm(true);
   }
 
-  const circleSize = Math.min(rs(220), 260);
-  const radius = circleSize / 2 - 10;
-  const strokeWidth = rs(8);
+  function handleCancelEnd() {
+    setShowEndConfirm(false);
+  }
+
+  const circleSize = Math.max(120, Math.min(rs(220), 260));
+  const radius = Math.max(1, circleSize / 2 - 10);
+  const strokeWidth = Math.max(1, rs(8));
   const circumference = 2 * Math.PI * radius;
   const maxMs = 2 * 60 * 60 * 1000;
   const progress = Math.min(elapsedMs / maxMs, 1);
@@ -199,15 +338,28 @@ export default function FocusScreen() {
       textTransform: "uppercase",
       marginBottom: rs(36),
     },
-    svgWrapper: { alignItems: "center", justifyContent: "center" },
-    timerOverlay: { position: "absolute", alignItems: "center" },
+    svgWrapper: {
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    timerOverlay: {
+      position: "absolute",
+      alignItems: "center",
+    },
     elapsed: {
       fontSize: Math.min(rs(44), 54),
       fontWeight: "600",
       color: "#e0d8c4",
     },
-    elapsedLabel: { fontSize: rs(13), color: colors.primaryDark, marginTop: rs(4) },
-    bottomArea: { width: "100%", marginTop: rs(40) },
+    elapsedLabel: {
+      fontSize: rs(13),
+      color: colors.primaryDark,
+      marginTop: rs(4),
+    },
+    bottomArea: {
+      width: "100%",
+      marginTop: rs(40),
+    },
     endButton: {
       width: "100%",
       backgroundColor: colors.primary,
@@ -227,6 +379,60 @@ export default function FocusScreen() {
       fontWeight: "700",
       letterSpacing: 0.3,
     },
+    confirmOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: "rgba(0,0,0,0.52)",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: rs(24),
+    },
+    confirmCard: {
+      width: "100%",
+      maxWidth: 360,
+      backgroundColor: "#F4F1EA",
+      borderRadius: rs(24),
+      padding: rs(22),
+    },
+    confirmTitle: {
+      fontSize: rs(20),
+      fontWeight: "800",
+      color: "#26221A",
+      marginBottom: rs(8),
+    },
+    confirmBody: {
+      fontSize: rs(14),
+      lineHeight: rs(21),
+      color: "#5F654F",
+      marginBottom: rs(20),
+    },
+    confirmButtonRow: {
+      flexDirection: "row",
+      gap: rs(10),
+    },
+    cancelButton: {
+      flex: 1,
+      paddingVertical: rs(14),
+      borderRadius: rs(14),
+      alignItems: "center",
+      backgroundColor: "rgba(135,152,106,0.16)",
+    },
+    cancelButtonText: {
+      fontSize: rs(14),
+      fontWeight: "800",
+      color: "#6A7A52",
+    },
+    confirmEndButton: {
+      flex: 1,
+      paddingVertical: rs(14),
+      borderRadius: rs(14),
+      alignItems: "center",
+      backgroundColor: "#87986A",
+    },
+    confirmEndButtonText: {
+      fontSize: rs(14),
+      fontWeight: "800",
+      color: "#F4F1EA",
+    },
   });
 
   return (
@@ -245,7 +451,7 @@ export default function FocusScreen() {
             strokeWidth={strokeWidth}
           />
           <Circle
-            stroke={colors.heat[2]}
+            stroke={colors.heat?.[2] ?? colors.primary}
             fill="none"
             cx={circleSize / 2}
             cy={circleSize / 2}
@@ -285,6 +491,36 @@ export default function FocusScreen() {
           <Text style={s.endText}>집중 세션 종료</Text>
         </TouchableOpacity>
       </View>
+
+      {showEndConfirm && (
+        <View style={s.confirmOverlay}>
+          <View style={s.confirmCard}>
+            <Text style={s.confirmTitle}>세션 종료</Text>
+            <Text style={s.confirmBody}>
+              지금 집중 세션을 종료하시겠어요?{"\n"}
+              화면이 꺼져 있었던 시간도 포함해서 저장됩니다.
+            </Text>
+
+            <View style={s.confirmButtonRow}>
+              <TouchableOpacity
+                style={s.cancelButton}
+                onPress={handleCancelEnd}
+                activeOpacity={0.85}
+              >
+                <Text style={s.cancelButtonText}>계속 집중</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={s.confirmEndButton}
+                onPress={goToStudyEnd}
+                activeOpacity={0.85}
+              >
+                <Text style={s.confirmEndButtonText}>종료하기</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }

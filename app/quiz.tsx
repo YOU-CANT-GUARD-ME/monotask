@@ -1,5 +1,5 @@
 // app/quiz.tsx
-import { Ionicons } from "@expo/vector-icons";
+import AppIcon from "../components/AppIcon";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   useWindowDimensions,
   View,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
@@ -42,7 +43,7 @@ const DIFFICULTY_OPTIONS: {
   key: Difficulty;
   label: string;
   desc: string;
-  icon: React.ComponentProps<typeof Ionicons>["name"];
+  icon: string;
 }[] = [
   { key: "easy", label: "쉬움", desc: "기본 개념 확인", icon: "leaf-outline" },
   { key: "medium", label: "보통", desc: "응용 및 추론 포함", icon: "flame-outline" },
@@ -775,14 +776,16 @@ export default function QuizScreen() {
   // ── STAGE: SETTINGS ─────────────────────────────────────────────────────
   if (stage === "settings") {
     return (
-      <SafeAreaView style={s.safe}>
+      <SafeAreaView style={s.safe}
+      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+    >
         <ScrollView
           contentContainerStyle={{ paddingHorizontal: rs(24), paddingBottom: rs(40) }}
           showsVerticalScrollIndicator={false}
         >
           <View style={s.header}>
             <TouchableOpacity style={s.closeBtn} onPress={() => router.back()}>
-              <Ionicons name="close" size={rs(20)} color={colors.textMuted} />
+              <AppIcon name="close" size={rs(20)} color={colors.textMuted} />
             </TouchableOpacity>
             <Text style={s.settingsTitle}>퀴즈 설정</Text>
             <View style={{ width: rs(36) }} />
@@ -805,7 +808,7 @@ export default function QuizScreen() {
                 style={[s.diffCard, selected && s.diffCardSelected]}
               >
                 <View style={[s.diffIcon, selected && s.diffIconSelected]}>
-                  <Ionicons
+                  <AppIcon
                     name={opt.icon}
                     size={rs(20)}
                     color={selected ? colors.onPrimary : colors.primary}
@@ -820,7 +823,7 @@ export default function QuizScreen() {
                   </Text>
                 </View>
                 {selected && (
-                  <Ionicons name="checkmark" size={rs(20)} color={colors.onPrimary} />
+                  <AppIcon name="checkmark" size={rs(20)} color={colors.onPrimary} />
                 )}
               </TouchableOpacity>
             );
@@ -964,11 +967,13 @@ export default function QuizScreen() {
   // ── STAGE: LOADING ──────────────────────────────────────────────────────
   if (stage === "loading") {
     return (
-      <SafeAreaView style={s.safe}>
+      <SafeAreaView style={s.safe}
+      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+    >
         <View style={s.container}>
           <View style={s.header}>
             <TouchableOpacity style={s.closeBtn} onPress={() => setStage("settings")}>
-              <Ionicons name="close" size={rs(20)} color={colors.textMuted} />
+              <AppIcon name="close" size={rs(20)} color={colors.textMuted} />
             </TouchableOpacity>
             <View />
             <View style={{ width: rs(36) }} />
@@ -977,7 +982,7 @@ export default function QuizScreen() {
           {error ? (
             <View style={s.centeredWrap}>
               <View style={s.errorIcon}>
-                <Ionicons name="alert-circle-outline" size={rs(32)} color={colors.danger} />
+                <AppIcon name="alert-circle-outline" size={rs(32)} color={colors.danger} />
               </View>
               <Text style={s.errorTitle}>퀴즈 생성 실패</Text>
               <Text style={s.errorText}>{error}</Text>
@@ -1023,11 +1028,13 @@ export default function QuizScreen() {
     };
 
     return (
-      <SafeAreaView style={s.safe}>
+      <SafeAreaView style={s.safe}
+      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+    >
         <View style={s.container}>
           <View style={s.header}>
             <TouchableOpacity style={s.closeBtn} onPress={() => router.back()}>
-              <Ionicons name="close" size={rs(20)} color={colors.textMuted} />
+              <AppIcon name="close" size={rs(20)} color={colors.textMuted} />
             </TouchableOpacity>
             <Text style={s.progressText}>
               {currentIdx + 1} / {questions.length}
@@ -1059,7 +1066,7 @@ export default function QuizScreen() {
           ) : (
             <View style={s.encourageWrap}>
               <View style={s.encourageIcon}>
-                <Ionicons name="bulb-outline" size={rs(26)} color={colors.primary} />
+                <AppIcon name="bulb-outline" size={rs(26)} color={colors.primary} />
               </View>
               <Text style={s.encourageText}>
                 {ENCOURAGEMENTS[currentIdx % ENCOURAGEMENTS.length]}
@@ -1135,14 +1142,16 @@ export default function QuizScreen() {
   const difficultyLabel = DIFFICULTY_OPTIONS.find((d) => d.key === difficulty)?.label;
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe}
+      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+    >
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: rs(24), paddingBottom: rs(48) }}
       >
         <View style={s.header}>
           <TouchableOpacity style={s.closeBtn} onPress={() => router.back()}>
-            <Ionicons name="close" size={rs(20)} color={colors.textMuted} />
+            <AppIcon name="close" size={rs(20)} color={colors.textMuted} />
           </TouchableOpacity>
           <Text style={s.progressText}>결과</Text>
           <View style={{ width: rs(36) }} />
@@ -1190,7 +1199,7 @@ export default function QuizScreen() {
                     isCorrect ? s.reviewIconCorrect : s.reviewIconWrong,
                   ]}
                 >
-                  <Ionicons
+                  <AppIcon
                     name={isCorrect ? "checkmark" : "close"}
                     size={rs(16)}
                     color={colors.onPrimary}
@@ -1227,7 +1236,7 @@ export default function QuizScreen() {
             onPress={() => router.back()}
             activeOpacity={0.85}
           >
-            <Ionicons name="arrow-back" size={rs(15)} color={colors.text} />
+            <AppIcon name="arrow-back" size={rs(15)} color={colors.text} />
             <Text style={s.footerBtnTextSecondary}>돌아가기</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -1235,7 +1244,7 @@ export default function QuizScreen() {
             onPress={handleRetake}
             activeOpacity={0.85}
           >
-            <Ionicons name="refresh" size={rs(15)} color={colors.onPrimary} />
+            <AppIcon name="refresh" size={rs(15)} color={colors.onPrimary} />
             <Text style={s.footerBtnTextPrimary}>다시 풀기</Text>
           </TouchableOpacity>
         </View>

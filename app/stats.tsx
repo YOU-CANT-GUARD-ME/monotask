@@ -1,5 +1,5 @@
 // app/stats.tsx
-import { FontAwesome, Ionicons } from "@expo/vector-icons";
+import AppIcon from "../components/AppIcon";
 import { useFocusEffect } from "expo-router";
 import React, {
   useCallback,
@@ -15,6 +15,7 @@ import {
   TouchableOpacity,
   useWindowDimensions,
   View,
+  Platform
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle, Line, Polyline } from "react-native-svg";
@@ -607,7 +608,9 @@ export default function StatsScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={s.safe}>
+      <SafeAreaView style={s.safe}
+      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+    >
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <Text style={{ color: colors.textFaint, fontSize: rs(14) }}>
             불러오는 중…
@@ -618,7 +621,9 @@ export default function StatsScreen() {
   }
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe}
+      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+    >
       <Animated.ScrollView
         style={[s.scroll, { opacity: fadeAnim }]}
         contentContainerStyle={s.scrollContent}
@@ -629,7 +634,7 @@ export default function StatsScreen() {
             <Text style={s.headerTitle}>통계</Text>
             <Text style={s.headerSub}>공부 기록을 한눈에</Text>
           </View>
-          <Ionicons name="stats-chart" size={rs(22)} color={colors.primary} />
+          <AppIcon name="stats-chart" size={rs(22)} color={colors.primary} />
         </View>
 
         <View style={s.summaryRow}>
@@ -644,7 +649,7 @@ export default function StatsScreen() {
                 gap: rs(4),
               }}
             >
-              <FontAwesome
+              <AppIcon
                 name="fire"
                 size={rs(10)}
                 color="rgba(244,241,234,0.75)"
@@ -676,7 +681,7 @@ export default function StatsScreen() {
                   setSelectedDay(null);
                 }}
               >
-                <Ionicons name="chevron-back" size={rs(14)} color={colors.textMuted} />
+                <AppIcon name="chevron-back" size={rs(14)} color={colors.textMuted} />
               </TouchableOpacity>
               <Text style={s.weekLabelText}>{weekLabel}</Text>
               <TouchableOpacity
@@ -687,7 +692,7 @@ export default function StatsScreen() {
                   setSelectedDay(null);
                 }}
               >
-                <Ionicons name="chevron-forward" size={rs(14)} color={colors.textMuted} />
+                <AppIcon name="chevron-forward" size={rs(14)} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
           </View>
@@ -731,7 +736,7 @@ export default function StatsScreen() {
                 {selectedDay.label} — {formatHm(selectedDay.ms)} 공부
               </Text>
               <TouchableOpacity onPress={() => setSelectedDay(null)}>
-                <Ionicons name="close-circle" size={rs(16)} color={colors.border} />
+                <AppIcon name="close-circle" size={rs(16)} color={colors.border} />
               </TouchableOpacity>
             </View>
           )}
@@ -793,7 +798,7 @@ export default function StatsScreen() {
 
           {totalQuizzes === 0 ? (
             <View style={s.quizEmpty}>
-              <Ionicons
+              <AppIcon
                 name="help-circle-outline"
                 size={rs(28)}
                 color={colors.border}

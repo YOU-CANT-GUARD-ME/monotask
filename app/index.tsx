@@ -1,9 +1,9 @@
 // app/index.tsx
-import { Ionicons } from "@expo/vector-icons";
-import { Tabs, useRouter } from "expo-router";
+import AppIcon from "../components/AppIcon";
+import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Alert,
+  Platform,
   Animated,
   Easing,
   ScrollView,
@@ -19,6 +19,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useStudyStats } from "../hooks/useStudyStats";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
+import LoginRequiredModal from "../components/LoginRequiredModal";
 
 let hasShownSplash = false;
 
@@ -150,11 +151,16 @@ function SplashOverlay({ onDone }: { onDone: () => void }) {
 }
 
 export default function HomeScreen() {
+  const [showLoginRequired, setShowLoginRequired] = useState(false);
   const { width } = useWindowDimensions();
-  const scale = width / 390;
-  const rs = (n: number) => Math.round(n * scale);
+
+  // Web can briefly report width as 0 during first render.
+  // Clamp it so SVG circle radius never becomes negative.
+  const safeWidth = width && width > 0 ? width : 390;
+  const scale = safeWidth / 390;
+  const rs = (n: number) => Math.max(1, Math.round(n * scale));
   const router = useRouter();
-  const { colors, resolvedMode } = useTheme();
+  const { colors } = useTheme();
   
   const [splashDone, setSplashDone] = useState(hasShownSplash);
   const [isLoggedIn, setIsLoggedIn] = useState(!!auth.currentUser);
@@ -177,20 +183,15 @@ export default function HomeScreen() {
   const progress = dailyGoalMs > 0 ? Math.min(todayMs / dailyGoalMs, 1) : 0;
   const progressPct = Math.round(progress * 100);
 
-  const circleSize = Math.min(rs(120), 160);
-  const radius = circleSize / 2 - 8;
-  const strokeWidth = rs(8);
+  const circleSize = Math.max(32, Math.min(rs(120), 160));
+  const radius = Math.max(1, circleSize / 2 - 8);
+  const strokeWidth = Math.max(1, rs(8));
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference * (1 - progress);
 
-  const TAB_BAR_STYLE = {
-    backgroundColor: resolvedMode === "dark" ? colors.bg : colors.primary,
-    borderTopColor: resolvedMode === "dark" ? "rgba(255,255,255,0.08)" : colors.primaryDark,
-    borderTopWidth: 1,
-    height: 88,
-    paddingBottom: 28,
-    paddingTop: 10,
-  };
+  function showLoginRequiredAlert() {
+    setShowLoginRequired(true);
+  }
 
   const s = StyleSheet.create({
     safe: { flex: 1, backgroundColor: colors.bg },
@@ -305,21 +306,26 @@ export default function HomeScreen() {
   });
 
   return (
-    <SafeAreaView style={s.safe}>
-      <Tabs.Screen
-        options={{
-          tabBarStyle: splashDone ? TAB_BAR_STYLE : { display: "none" },
+    <SafeAreaView
+      style={s.safe}
+    
+      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+    >
+  <ScrollView
+    style={{ flex: 1, backgroundColor: colors.bg }}
+    contentContainerStyle={{ flexGrow: 1, paddingBottom: rs(48) }}
+    showsVerticalScrollIndicator={false}
+  >
+  <View style={[s.container, { flexGrow: 1 }]}>
+      <LoginRequiredModal
+        visible={showLoginRequired}
+        onClose={() => setShowLoginRequired(false)}
+        onGoProfile={() => {
+          setShowLoginRequired(false);
+          router.push("/profile");
         }}
       />
 
-      {!splashDone && <SplashOverlay onDone={handleSplashDone} />}
-
-      <ScrollView
-        style={{ flex: 1, backgroundColor: colors.bg }}
-        contentContainerStyle={{ paddingBottom: rs(48) }}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={s.container}>
           <Text style={s.greeting}>{getGreeting()}</Text>
           <Text style={s.title}>집중할 준비 됐나요?</Text>
 
@@ -368,17 +374,7 @@ export default function HomeScreen() {
             style={s.button}
             onPress={() => {
               if (!isLoggedIn) {
-                Alert.alert(
-                  "로그인이 필요해요",
-                  "집중 세션을 저장하려면 먼저 로그인해주세요.",
-                  [
-                    { text: "취소", style: "cancel" },
-                    {
-                      text: "프로필로 가기",
-                      onPress: () => router.push("/profile"),
-                    },
-                  ]
-                );
+                showLoginRequiredAlert();
                 return;
               }
               router.push({
@@ -387,7 +383,7 @@ export default function HomeScreen() {
               });
             }}
           >
-            <Ionicons name="play" size={rs(16)} color={colors.onPrimary} />
+            <AppIcon name="play" size={rs(16)} color={colors.onPrimary} />
             <Text style={s.buttonText}>집중 시작</Text>
           </TouchableOpacity>
 
@@ -406,7 +402,7 @@ export default function HomeScreen() {
                 <Text style={s.smallValue}>...</Text>
               ) : streakDays > 0 ? (
                 <View style={s.streakRow}>
-                  <Ionicons name="flame" size={rs(16)} color={colors.warning} />
+                  <AppIcon name="flame" size={rs(16)} color={colors.warning} />
                   <Text style={s.smallValue}>{streakDays}일</Text>
                 </View>
               ) : (
