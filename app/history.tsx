@@ -106,11 +106,11 @@ function DetailModal({
   }, [session?.id]);
 
   React.useEffect(() => {
-  if (session) {
-    console.log("photoUris:", session.photoUris);
-    console.log("photoUri:", session.photoUri);
-  }
-}, [session?.id]);
+    if (session) {
+      console.log("photoUris:", session.photoUris);
+      console.log("photoUri:", session.photoUri);
+    }
+  }, [session?.id]);
 
   if (!session) return null;
 
@@ -132,6 +132,28 @@ function DetailModal({
           aiSummary: session.aiSummary ?? "",
           subject: session.subject ?? "기타",
           sessionId: session.id,
+        },
+      });
+    }, 250);
+  };
+
+  const handleAddNote = () => {
+    onClose();
+    setTimeout(() => {
+      router.push({
+        pathname: "/study-end",
+        params: {
+          sessionId: session.id,
+          mode: "addNote",
+          startTime: session.startTime,
+          durationMs: String(session.durationMs),
+          photoUris: JSON.stringify(
+            session.photoUris && session.photoUris.length > 0
+              ? session.photoUris
+              : session.photoUri
+                ? [session.photoUri]
+                : []
+          ),
         },
       });
     }, 250);
@@ -234,7 +256,7 @@ function DetailModal({
       zIndex: 10,
     },
     fsImage: { width: "100%", height: "80%" },
-    
+
     // Custom Popups Style Sheet Tokens
     popBackdrop: {
       flex: 1,
@@ -369,8 +391,8 @@ function DetailModal({
                   {(session.photoUris && session.photoUris.length > 0
                     ? session.photoUris
                     : session.photoUri
-                    ? [session.photoUri]
-                    : []
+                      ? [session.photoUri]
+                      : []
                   ).map((uri, i) => (
                     <TouchableOpacity
                       key={`${uri}-${i}`}
@@ -381,7 +403,7 @@ function DetailModal({
                         height: Math.floor((width - 22 * 2 - rs(8) * 2) / 3) - 1,
                         borderRadius: rs(12),
                         overflow: "hidden",
-                        backgroundColor: colors.surfaceAlt, 
+                        backgroundColor: colors.surfaceAlt,
                       }}
                     >
                       <Image
@@ -432,9 +454,9 @@ function DetailModal({
                     .getHours()
                     .toString()
                     .padStart(2, "0")}:${date
-                    .getMinutes()
-                    .toString()
-                    .padStart(2, "0")}`;
+                      .getMinutes()
+                      .toString()
+                      .padStart(2, "0")}`;
                   const isBest =
                     a.percentage ===
                     Math.max(...attempts.map((x) => x.percentage));
@@ -463,8 +485,8 @@ function DetailModal({
                             a.percentage >= 80
                               ? colors.primary
                               : a.percentage >= 50
-                              ? colors.primarySoft
-                              : colors.surfaceAlt,
+                                ? colors.primarySoft
+                                : colors.surfaceAlt,
                           alignItems: "center",
                           justifyContent: "center",
                         }}
@@ -558,6 +580,32 @@ function DetailModal({
                 OX 퀴즈 풀기
               </Text>
             </TouchableOpacity>
+
+            {!session.noteText?.trim() && (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={handleAddNote}
+                style={[
+                  modal.deleteBtn,
+                  {
+                    marginTop: rs(10),
+                    paddingVertical: rs(15),
+                    borderRadius: rs(16),
+                    backgroundColor: colors.primarySoft,
+                  },
+                ]}
+              >
+                <AppIcon name="create-outline" size={rs(18)} color={colors.primary} />
+                <Text
+                  style={[
+                    modal.deleteBtnText,
+                    { fontSize: rs(14), color: colors.primary },
+                  ]}
+                >
+                  노트 추가하기
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               activeOpacity={0.85}
@@ -676,12 +724,12 @@ function DetailModal({
                     {reviewAttempt.percentage === 100
                       ? "완벽해요!"
                       : reviewAttempt.percentage >= 80
-                      ? "훌륭해요!"
-                      : reviewAttempt.percentage >= 60
-                      ? "잘했어요!"
-                      : reviewAttempt.percentage >= 40
-                      ? "괜찮아요"
-                      : "다시 복습해봐요"}
+                        ? "훌륭해요!"
+                        : reviewAttempt.percentage >= 60
+                          ? "잘했어요!"
+                          : reviewAttempt.percentage >= 40
+                            ? "괜찮아요"
+                            : "다시 복습해봐요"}
                   </Text>
                   <Text style={{ fontSize: rs(13), color: colors.textMuted }}>
                     {reviewAttempt.score}개 정답, {reviewAttempt.total - reviewAttempt.score}개 오답
@@ -855,7 +903,7 @@ function DetailModal({
             </View>
             <Text style={modal.popTitle}>세션 삭제</Text>
             <Text style={modal.popDesc}>이 학습 기록을 삭제하시겠어요?</Text>
-            
+
             <View style={modal.popActionGrid}>
               <TouchableOpacity
                 activeOpacity={0.8}
@@ -864,7 +912,7 @@ function DetailModal({
               >
                 <Text style={modal.popCancelLabel}>취소</Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity
                 activeOpacity={0.8}
                 style={modal.popConfirmBtn}
@@ -923,7 +971,15 @@ function SessionCard({
     metaText: { color: colors.textFaint },
     notePreview: { color: colors.textMuted, marginTop: 2, lineHeight: 18 },
     photoTag: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2 },
+    pendingTag: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      marginTop: 2,
+    },
   });
+
+  const needsNote = !session.noteText?.trim();
 
   return (
     <View>
@@ -956,13 +1012,20 @@ function SessionCard({
               </View>
             )}
           </View>
-          {!!session.noteText?.trim() && (
-            <Text
-              style={[card.notePreview, { fontSize: rs(12) }]}
-              numberOfLines={2}
-            >
-              {session.noteText}
-            </Text>
+          {needsNote ? (
+            <View style={card.pendingTag}>
+              <AppIcon name="create-outline" size={rs(11)} color={colors.textFaint} />
+              <Text style={[card.metaText, { fontSize: rs(11) }]}>노트 미작성</Text>
+            </View>
+          ) : (
+            !!session.noteText?.trim() && (
+              <Text
+                style={[card.notePreview, { fontSize: rs(12) }]}
+                numberOfLines={2}
+              >
+                {session.noteText}
+              </Text>
+            )
           )}
         </View>
         <AppIcon name="chevron-forward" size={rs(14)} color={colors.border} />

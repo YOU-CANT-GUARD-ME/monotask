@@ -18,10 +18,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "../contexts/ThemeContext";
+import { saveSession } from "../utils/storage";
 
 type Screen = "end" | "later" | "note";
 
 const MAX_PHOTOS = 6;
+const SUBJECT_OPTIONS = ["수학", "영어", "과학", "국어", "사회", "기타"];
 
 function parsePhotoUris(raw?: string): string[] {
   if (!raw) return [];
@@ -67,16 +69,27 @@ export default function StudyEndScreen() {
     durationMs?: string;
     startTime?: string;
     photoUris?: string;
+    sessionId?: string;
+    mode?: string; // "addNote" when resuming a note-less session from history
   }>();
   const durationMs = Number(params.durationMs ?? 0);
   const startTime = params.startTime ?? new Date().toISOString();
+  const isAddNoteMode = params.mode === "addNote";
 
-  const [screen, setScreen] = useState<Screen>("end");
+  // Only jump straight to the note screen when explicitly resuming a
+  // note-less session from history (mode === "addNote"). A normal session
+  // ending from focus.tsx always passes a sessionId too, but never sets
+  // mode, so it correctly lands on the "end" choice screen.
+  const [screen, setScreen] = useState<Screen>(isAddNoteMode ? "note" : "end");
   const [noteText, setNoteText] = useState("");
+  const [subject, setSubject] = useState("");
   const [photoUris, setPhotoUris] = useState<string[]>(
     parsePhotoUris(params.photoUris)
   );
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+  const [sessionId, setSessionId] = useState<string>(
+    params.sessionId || Date.now().toString()
+  );
 
   // Detect new sessions vs returning from camera
   const lastSessionKey = React.useRef<string | null>(null);
@@ -85,12 +98,14 @@ export default function StudyEndScreen() {
     const key = `${params.startTime ?? ""}::${params.durationMs ?? ""}`;
     if (lastSessionKey.current !== key) {
       lastSessionKey.current = key;
-      setScreen("end");
+      setScreen(isAddNoteMode ? "note" : "end");
       setNoteText("");
+      setSubject("");
       setPhotoUris(parsePhotoUris(params.photoUris));
       setPreviewIdx(null);
+      setSessionId(params.sessionId || Date.now().toString());
     }
-  }, [params.startTime, params.durationMs]);
+  }, [params.startTime, params.durationMs, params.sessionId, params.mode]);
 
   // Returning from camera with new photoUris
   React.useEffect(() => {
@@ -116,6 +131,21 @@ export default function StudyEndScreen() {
         existingPhotoUris: JSON.stringify(photoUris),
       },
     });
+  }
+
+  // Save whatever we have so far (time + photos, no note yet) so that
+  // choosing "나중에" or leaving the screen never loses the study session.
+  async function savePendingSession() {
+    try {
+      await saveSession({
+        id: sessionId,
+        startTime: new Date(startTime).getTime(),
+        durationMs,
+        photoUris,
+      });
+    } catch (e) {
+      console.warn("failed to save pending session:", e);
+    }
   }
 
   // Grid dimensions: 3 columns
@@ -312,6 +342,38 @@ export default function StudyEndScreen() {
       marginTop: rs(8),
     },
 
+    subjectLabel: {
+      fontSize: rs(11),
+      color: colors.textFaint,
+      fontWeight: "700",
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: rs(8),
+    },
+    subjectRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: rs(8),
+      marginBottom: rs(20),
+    },
+    subjectChip: {
+      paddingVertical: rs(10),
+      paddingHorizontal: rs(16),
+      borderRadius: rs(14),
+      backgroundColor: colors.surface,
+    },
+    subjectChipSelected: {
+      backgroundColor: colors.primary,
+    },
+    subjectChipText: {
+      fontSize: rs(13),
+      fontWeight: "700",
+      color: colors.textMuted,
+    },
+    subjectChipTextSelected: {
+      color: colors.onPrimary,
+    },
+
     photosLabel: {
       fontSize: rs(11),
       color: colors.textFaint,
@@ -449,7 +511,10 @@ export default function StudyEndScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={s.choiceBtn}
-              onPress={() => setScreen("later")}
+              onPress={() => {
+                savePendingSession();
+                setScreen("later");
+              }}
               activeOpacity={0.85}
             >
               <AppIcon name="time-outline" size={rs(26)} color={colors.textMuted} />
@@ -458,7 +523,13 @@ export default function StudyEndScreen() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={s.skipBtn} onPress={() => router.replace("/")}>
+          <TouchableOpacity
+            style={s.skipBtn}
+            onPress={() => {
+              savePendingSession();
+              router.replace("/");
+            }}
+          >
             <Text style={s.skipText}>그냥 홈으로 가기</Text>
           </TouchableOpacity>
         </ScrollView>
@@ -479,7 +550,7 @@ export default function StudyEndScreen() {
             </View>
             <Text style={s.laterTitle}>알겠어요, 나중에 할게요</Text>
             <Text style={s.laterSub}>
-              {"정리하지 않은 공부가 남아 있어요.\n나중에 알림으로 알려드릴게요."}
+              {"오늘 공부 기록은 저장됐어요.\n기록 탭에서 언제든 노트를 추가할 수 있어요."}
             </Text>
             <View style={s.pendingCard}>
               <View style={s.pendingDot} />
@@ -514,7 +585,10 @@ export default function StudyEndScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <TouchableOpacity style={s.backBtn} onPress={() => setScreen("end")}>
+        <TouchableOpacity
+          style={s.backBtn}
+          onPress={() => (isAddNoteMode ? router.back() : setScreen("end"))}
+        >
           <AppIcon name="chevron-back" size={rs(16)} color={colors.primary} />
           <Text style={s.backText}>뒤로</Text>
         </TouchableOpacity>
@@ -522,6 +596,30 @@ export default function StudyEndScreen() {
         <View style={s.noteHeader}>
           <Text style={s.noteScreenTitle}>복습 노트 작성</Text>
           <Text style={s.noteDate}>{formatDate(startTime)} · 오늘 공부</Text>
+        </View>
+
+        <Text style={s.subjectLabel}>과목</Text>
+        <View style={s.subjectRow}>
+          {SUBJECT_OPTIONS.map((opt) => {
+            const selected = subject === opt;
+            return (
+              <TouchableOpacity
+                key={opt}
+                onPress={() => setSubject(opt)}
+                activeOpacity={0.8}
+                style={[s.subjectChip, selected && s.subjectChipSelected]}
+              >
+                <Text
+                  style={[
+                    s.subjectChipText,
+                    selected && s.subjectChipTextSelected,
+                  ]}
+                >
+                  {opt}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         <View style={s.noteInputWrapper}>
@@ -584,6 +682,8 @@ export default function StudyEndScreen() {
                 durationMs: String(durationMs),
                 startTime,
                 photoUris: JSON.stringify(photoUris),
+                subject,
+                sessionId,
               },
             })
           }

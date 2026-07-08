@@ -10,9 +10,12 @@ import React, {
 } from "react";
 import {
   Animated,
+  Modal,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   useWindowDimensions,
   View,
   Platform
@@ -21,6 +24,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle, Line, Polyline } from "react-native-svg";
 import { ThemePalette } from "../constants/themes";
 import { useTheme } from "../contexts/ThemeContext";
+import { auth } from "../firebase";
+import { getMyFriends } from "../utils/friends";
+import {
+  getLeaderboard,
+  LeaderboardEntry,
+  syncMyLeaderboardEntry,
+} from "../utils/leaderboard";
 import {
   getQuizAttempts,
   getSessions,
@@ -42,6 +52,27 @@ function formatHm(ms: number): string {
   if (h > 0) return `${h}h`;
   if (m > 0) return `${m}m`;
   return "0m";
+}
+
+function initialsOf(name: string): string {
+  return name
+    .split(" ")
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+}
+
+function formatLeaderboardTime(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${hours.toString().padStart(2, "0")}:${minutes
+    .toString()
+    .padStart(2, "0")}:${seconds
+    .toString()
+    .padStart(2, "0")}`;
 }
 
 const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
@@ -146,13 +177,10 @@ function AnimatedBar({
 }
 
 // ─── Daily quiz score chart ─────────────────────────────────────────────────
-//
-// Aggregates quiz attempts by day. For days with multiple attempts, shows the
-// average percentage. Empty days are gaps in the line.
 
 type DailyQuizPoint = {
   dateTs: number;
-  avgPct: number | null; // null = no attempts that day
+  avgPct: number | null;
   count: number;
 };
 
@@ -161,7 +189,6 @@ function buildDailyQuizSeries(
   days: number
 ): DailyQuizPoint[] {
   const today = startOfDay(Date.now());
-  // Build empty points for the last N days, oldest first
   const points: DailyQuizPoint[] = [];
   for (let i = days - 1; i >= 0; i--) {
     points.push({
@@ -171,7 +198,6 @@ function buildDailyQuizSeries(
     });
   }
 
-  // Accumulate sums per day key for averaging
   const sums = new Map<number, { total: number; count: number }>();
   for (const a of attempts) {
     const key = startOfDay(a.takenAt);
@@ -202,7 +228,6 @@ function QuizLineChart({
   height: number;
   colors: ThemePalette;
 }) {
-  // Chart drawing area
   const padTop = 12;
   const padBottom = 24;
   const padLeft = 28;
@@ -210,24 +235,18 @@ function QuizLineChart({
   const chartW = width - padLeft - padRight;
   const chartH = height - padTop - padBottom;
 
-  // x positions evenly spaced
   const xAt = (i: number) =>
     padLeft + (points.length > 1 ? (i / (points.length - 1)) * chartW : chartW / 2);
-  // y positions: percentage 0..100 maps inverted
   const yAt = (pct: number) => padTop + (1 - pct / 100) * chartH;
 
-  // Build polyline string from non-null points; gaps just don't get added
-  // (Polyline doesn't render isolated single points, so we'll add Circles too)
   const linePoints = points
     .map((p, i) => (p.avgPct !== null ? `${xAt(i)},${yAt(p.avgPct)}` : null))
     .filter((v) => v !== null) as string[];
 
-  // Y-axis gridlines at 0, 50, 100
   const gridY = [0, 50, 100];
 
   return (
     <Svg width={width} height={height}>
-      {/* Horizontal grid lines */}
       {gridY.map((pct) => (
         <Line
           key={pct}
@@ -240,7 +259,6 @@ function QuizLineChart({
         />
       ))}
 
-      {/* Score line */}
       {linePoints.length > 1 && (
         <Polyline
           points={linePoints.join(" ")}
@@ -252,7 +270,6 @@ function QuizLineChart({
         />
       )}
 
-      {/* Data point circles */}
       {points.map((p, i) =>
         p.avgPct !== null ? (
           <Circle
@@ -270,6 +287,10 @@ function QuizLineChart({
   );
 }
 
+// ─── Leaderboard types / helpers ────────────────────────────────────────────
+
+type LbMode = "global" | "friends" | "streak";
+
 export default function StatsScreen() {
   const { width } = useWindowDimensions();
   const scale = width / 390;
@@ -285,8 +306,13 @@ export default function StatsScreen() {
   } | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const [heatWeeks] = useState(18);
-  // Quiz chart range: 7 or 30 days
   const [quizRange, setQuizRange] = useState<7 | 30>(7);
+
+  // Leaderboard state
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [friendUids, setFriendUids] = useState<Set<string>>(new Set());
+  const [lbExpanded, setLbExpanded] = useState(false);
+  const [lbMode, setLbMode] = useState<LbMode>("global");
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -301,6 +327,23 @@ export default function StatsScreen() {
       duration: 400,
       useNativeDriver: true,
     }).start();
+
+    // Best-effort: push my latest stats, then pull the full leaderboard +
+    // my friends list. None of this blocks the main stats UI above.
+    syncMyLeaderboardEntry().catch((e) =>
+      console.warn("leaderboard sync failed:", e)
+    );
+    getLeaderboard()
+      .then(setLeaderboard)
+      .catch((e) => console.warn("leaderboard fetch failed:", e));
+    getMyFriends()
+      .then((friends) => {
+        const uids = new Set(
+          friends.filter((f) => f.status === "accepted").map((f) => f.uid)
+        );
+        setFriendUids(uids);
+      })
+      .catch((e) => console.warn("friends fetch failed:", e));
   }, []);
 
   useFocusEffect(
@@ -382,6 +425,41 @@ export default function StatsScreen() {
     : `${Math.abs(weekOffset)}주 전`;
 
   const BAR_AREA_HEIGHT = rs(140);
+
+  // ── Leaderboard derived lists ──────────────────────────────────────────
+  const myUid = auth.currentUser?.uid;
+
+  const globalWeekly = useMemo(
+    () => [...leaderboard].sort((a, b) => b.weeklyMs - a.weeklyMs),
+    [leaderboard]
+  );
+  const globalStreak = useMemo(
+    () => [...leaderboard].sort((a, b) => b.streak - a.streak),
+    [leaderboard]
+  );
+  const friendsWeekly = useMemo(
+    () => globalWeekly.filter((e) => friendUids.has(e.uid) || e.uid === myUid),
+    [globalWeekly, friendUids, myUid]
+  );
+
+  const activeList = useMemo(() => {
+    if (lbMode === "friends") return friendsWeekly;
+    if (lbMode === "streak") return globalStreak;
+    return globalWeekly;
+  }, [lbMode, friendsWeekly, globalStreak, globalWeekly]);
+
+  const myRank = useMemo(() => {
+    const idx = activeList.findIndex((e) => e.uid === myUid);
+    return idx === -1 ? null : idx + 1;
+  }, [activeList, myUid]);
+
+const lbValueFor = (e: LeaderboardEntry) =>
+  lbMode === "streak"
+    ? `${e.streak}일`
+    : formatLeaderboardTime(e.weeklyMs);
+
+  const lbModeLabel = (mode: LbMode) =>
+    mode === "friends" ? "친구" : mode === "streak" ? "연속 기록" : "전체 · 이번 주";
 
   const s = StyleSheet.create({
     safe: { flex: 1, backgroundColor: colors.bg },
@@ -508,7 +586,6 @@ export default function StatsScreen() {
 
     monthRow: { flexDirection: "row", marginBottom: rs(6) },
 
-    // Quiz chart-specific styles
     quizSummaryRow: {
       flexDirection: "row",
       gap: rs(10),
@@ -576,6 +653,88 @@ export default function StatsScreen() {
       color: colors.textFaint,
       textAlign: "center",
     },
+
+    // ── Leaderboard styles ──
+    lbTitleRow: { flexDirection: "row", alignItems: "center", gap: rs(8) },
+    lbRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: rs(10),
+      paddingVertical: rs(8),
+    },
+    lbRank: {
+      width: rs(18),
+      fontSize: rs(12),
+      fontWeight: "800",
+      color: colors.textFaint,
+      textAlign: "center",
+    },
+    lbAvatar: {
+      width: rs(28),
+      height: rs(28),
+      borderRadius: rs(14),
+      backgroundColor: colors.primarySoft,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    lbAvatarText: { fontSize: rs(11), fontWeight: "800", color: colors.primary },
+    lbName: {
+      flex: 1,
+      fontSize: rs(13),
+      fontWeight: "600",
+      color: colors.text,
+    },
+    lbValue: { fontSize: rs(13), fontWeight: "800", color: colors.text },
+    lbEmpty: { fontSize: rs(12), color: colors.textFaint },
+
+    lbSheet: {
+      backgroundColor: colors.bg,
+      borderTopLeftRadius: rs(28),
+      borderTopRightRadius: rs(28),
+      paddingHorizontal: rs(22),
+      paddingTop: rs(14),
+      paddingBottom: rs(36),
+      maxHeight: "82%",
+    },
+    lbHandle: {
+      width: rs(38),
+      height: rs(4),
+      borderRadius: rs(2),
+      backgroundColor: colors.border,
+      alignSelf: "center",
+      marginBottom: rs(18),
+    },
+    lbSheetHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: rs(16),
+    },
+    lbSheetTitle: { fontSize: rs(18), fontWeight: "800", color: colors.text },
+    lbTabRow: {
+      flexDirection: "row",
+      backgroundColor: colors.surface,
+      borderRadius: rs(14),
+      padding: rs(4),
+      marginBottom: rs(16),
+    },
+    lbTab: {
+      flex: 1,
+      alignItems: "center",
+      paddingVertical: rs(9),
+      borderRadius: rs(11),
+    },
+    lbTabSelected: { backgroundColor: colors.bg },
+    lbTabText: { fontSize: rs(12), fontWeight: "700", color: colors.textFaint },
+    lbTabTextSelected: { color: colors.text },
+    lbFullRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: rs(12),
+      paddingVertical: rs(10),
+      paddingHorizontal: rs(10),
+      borderRadius: rs(14),
+    },
   });
 
   const heatPad = rs(20) * 2;
@@ -602,7 +761,6 @@ export default function StatsScreen() {
     return labels;
   }, [heatmap]);
 
-  // Quiz chart dimensions (matches the section card's inner width)
   const quizChartWidth = width - rs(24) * 2 - rs(20) * 2;
   const quizChartHeight = rs(160);
 
@@ -666,6 +824,66 @@ export default function StatsScreen() {
             <Text style={s.summaryLabel}>누적 시간</Text>
           </View>
         </View>
+
+        {/* ── Leaderboard widget (collapsed) ──────────────────────────── */}
+        <TouchableOpacity
+          style={s.sectionCard}
+          activeOpacity={0.85}
+          onPress={() => setLbExpanded(true)}
+        >
+          <View style={s.sectionHeader}>
+            <View style={s.lbTitleRow}>
+              <AppIcon name="trophy" size={rs(16)} color={colors.primary} />
+              <View>
+                <Text style={s.sectionTitle}>리더보드</Text>
+                <Text style={s.sectionSub}>{lbModeLabel(lbMode)}</Text>
+              </View>
+            </View>
+            <AppIcon name="chevron-forward" size={rs(16)} color={colors.border} />
+          </View>
+
+          {activeList.length === 0 ? (
+            <Text style={s.lbEmpty}>
+              {lbMode === "friends"
+                ? "친구를 추가하면 순위가 표시돼요"
+                : "아직 데이터가 없어요"}
+            </Text>
+          ) : (
+            <>
+              {activeList.slice(0, 3).map((e, i) => (
+                <View key={e.uid} style={s.lbRow}>
+                  <Text style={s.lbRank}>{i + 1}</Text>
+                  <View style={s.lbAvatar}>
+                    <Text style={s.lbAvatarText}>{initialsOf(e.displayName)}</Text>
+                  </View>
+                  <Text
+                    style={[s.lbName, e.uid === myUid && { color: colors.primary }]}
+                    numberOfLines={1}
+                  >
+                    {e.displayName}
+                    {e.uid === myUid ? " (나)" : ""}
+                  </Text>
+                  <Text style={s.lbValue}>{lbValueFor(e)}</Text>
+                </View>
+              ))}
+
+              {myRank && myRank > 3 && (
+                <View style={[s.lbRow, { marginTop: rs(2) }]}>
+                  <Text style={s.lbRank}>{myRank}</Text>
+                  <View style={s.lbAvatar}>
+                    <Text style={s.lbAvatarText}>
+                      {initialsOf(activeList[myRank - 1].displayName)}
+                    </Text>
+                  </View>
+                  <Text style={[s.lbName, { color: colors.primary }]}>나</Text>
+                  <Text style={s.lbValue}>
+                    {lbValueFor(activeList[myRank - 1])}
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
+        </TouchableOpacity>
 
         <View style={s.sectionCard}>
           <View style={s.sectionHeader}>
@@ -810,7 +1028,6 @@ export default function StatsScreen() {
             </View>
           ) : (
             <View style={{ position: "relative" }}>
-              {/* Y-axis labels: 100%, 50%, 0% */}
               <Text
                 style={[
                   s.quizYLabel,
@@ -929,6 +1146,100 @@ export default function StatsScreen() {
           </View>
         </View>
       </Animated.ScrollView>
+
+      {/* ── Leaderboard expanded sheet ─────────────────────────────────── */}
+      <Modal
+        visible={lbExpanded}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setLbExpanded(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setLbExpanded(false)}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)" }} />
+        </TouchableWithoutFeedback>
+
+        <View style={s.lbSheet}>
+          <View style={s.lbHandle} />
+          <View style={s.lbSheetHeader}>
+            <Text style={s.lbSheetTitle}>리더보드</Text>
+            <TouchableOpacity onPress={() => setLbExpanded(false)}>
+              <AppIcon name="close" size={rs(20)} color={colors.textFaint} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={s.lbTabRow}>
+            {(
+              [
+                { key: "global", label: "전체 · 이번 주" },
+                { key: "friends", label: "친구" },
+                { key: "streak", label: "연속 기록" },
+              ] as { key: LbMode; label: string }[]
+            ).map((tab) => {
+              const selected = lbMode === tab.key;
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  onPress={() => setLbMode(tab.key)}
+                  style={[s.lbTab, selected && s.lbTabSelected]}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[s.lbTabText, selected && s.lbTabTextSelected]}>
+                    {tab.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            style={{ maxHeight: rs(420) }}
+          >
+            {activeList.length === 0 ? (
+              <Text
+                style={{
+                  fontSize: rs(13),
+                  color: colors.textFaint,
+                  textAlign: "center",
+                  paddingVertical: rs(24),
+                }}
+              >
+                {lbMode === "friends"
+                  ? "친구를 추가하면 순위가 표시돼요"
+                  : "아직 데이터가 없어요"}
+              </Text>
+            ) : (
+              activeList.map((e, i) => (
+                <View
+                  key={e.uid}
+                  style={[
+                    s.lbFullRow,
+                    e.uid === myUid && { backgroundColor: colors.primarySoft },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      s.lbRank,
+                      i < 3 && { color: colors.primary, fontWeight: "800" },
+                    ]}
+                  >
+                    {i + 1}
+                  </Text>
+                  <View style={s.lbAvatar}>
+                    <Text style={s.lbAvatarText}>{initialsOf(e.displayName)}</Text>
+                  </View>
+                  <Text style={s.lbName} numberOfLines={1}>
+                    {e.displayName}
+                    {e.uid === myUid ? " (나)" : ""}
+                  </Text>
+                  <Text style={s.lbValue}>{lbValueFor(e)}</Text>
+                </View>
+              ))
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

@@ -1,7 +1,7 @@
 import React from "react";
 import Svg, { Circle, Line, Path, Polyline, Rect } from "react-native-svg";
 
-type IconName = "home" | "book" | "stats" | "user" | "lock" | "bellOff";
+type IconName = "home" | "book" | "stats" | "user" | "lock" | "bellOff" | "people";
 
 type Props = {
   name: IconName;
@@ -46,6 +46,17 @@ export default function MonoIcon({ name, size = 24, color = "#26221A" }: Props) 
       <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Circle cx="12" cy="8" r="3.5" stroke={color} strokeWidth={2.2} />
         <Path d="M5.5 20C6.4 16.8 8.8 15 12 15C15.2 15 17.6 16.8 18.5 20" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+      </Svg>
+    );
+  }
+
+  if (name === "people") {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Circle cx="9" cy="8" r="2.8" stroke={color} strokeWidth={2.2} />
+        <Path d="M4 19C4.7 16.3 6.6 15 9 15C11.4 15 13.3 16.3 14 19" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+        <Circle cx="16.5" cy="9" r="2.2" stroke={color} strokeWidth={2.2} />
+        <Path d="M14.8 15.2C17.3 15.4 18.8 16.6 19.4 19" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
       </Svg>
     );
   }

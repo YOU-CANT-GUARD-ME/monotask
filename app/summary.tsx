@@ -2,6 +2,7 @@
 import AppIcon from "../components/AppIcon";
 import * as ImageManipulator from "expo-image-manipulator";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { syncMyLeaderboardEntry } from "../utils/leaderboard";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -367,14 +368,13 @@ export default function SummaryScreen() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [toastVisible, setToastVisible] = useState(false);
 
-  const sessionId = useRef(Date.now().toString()).current;
-
   const params = useLocalSearchParams<{
     noteText?: string;
     durationMs?: string;
     startTime?: string;
     photoUris?: string;
     subject?: string;
+    sessionId?: string;
   }>();
 
   const noteText = params.noteText || "";
@@ -382,6 +382,7 @@ export default function SummaryScreen() {
   const startTime = params.startTime ?? new Date().toISOString();
   const photoUris = parsePhotoUris(params.photoUris);
   const subject = params.subject || "기타";
+  const sessionId = useRef(params.sessionId || Date.now().toString()).current;
 
   const runFetch = (cancelled: { value: boolean }) => {
     setAiLoading(true);
@@ -415,10 +416,12 @@ export default function SummaryScreen() {
         });
       })
       .then(() => {
-        // Only update UI elements if the screen context is still alive
         if (!cancelled.value) {
           setToastVisible(true);
         }
+        syncMyLeaderboardEntry().catch((e) =>
+          console.warn("leaderboard sync failed:", e)
+        );
       })
       .catch((err) => {
         if (!cancelled.value) {

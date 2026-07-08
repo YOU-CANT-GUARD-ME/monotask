@@ -6,6 +6,7 @@ import { Animated, Easing, Platform, StyleSheet, View } from "react-native";
 import MonoIcon from "../components/MonoIcon";
 import ResumeFocusSession from "../components/ResumeFocusSession";
 import { ThemeProvider, useTheme } from "../contexts/ThemeContext";
+import { watchAuthAndSyncProfile } from "../utils/userProfile";
 
 const TAB_BAR_BASE_HEIGHT = 80;
 const TAB_BAR_TOP_PADDING = 6;
@@ -93,6 +94,7 @@ function ThemedTabs() {
       >
         <Tabs.Screen name="index" options={{ title: "홈", tabBarIcon: ({ color, size }) => <MonoIcon name="home" size={size} color={color} /> }} />
         <Tabs.Screen name="history" options={{ title: "기록", tabBarIcon: ({ color, size }) => <MonoIcon name="book" size={size} color={color} /> }} />
+        <Tabs.Screen name="friends" options={{ title: "친구", tabBarIcon: ({ color, size }) => <MonoIcon name="people" size={size} color={color} /> }} />
         <Tabs.Screen name="stats" options={{ title: "통계", tabBarIcon: ({ color, size }) => <MonoIcon name="stats" size={size} color={color} /> }} />
         <Tabs.Screen name="profile" options={{ title: "프로필", tabBarIcon: ({ color, size }) => <MonoIcon name="user" size={size} color={color} /> }} />
         <Tabs.Screen name="focus" options={{ href: null, tabBarStyle: { display: "none" } }} />
@@ -101,6 +103,7 @@ function ThemedTabs() {
         <Tabs.Screen name="study-end" options={{ href: null }} />
         <Tabs.Screen name="quiz" options={{ href: null, tabBarStyle: { display: "none" } }} />
         <Tabs.Screen name="reset-password" options={{ href: null, tabBarStyle: { display: "none" } }} />
+        <Tabs.Screen name="friend-profile" options={{ href: null }} />
       </Tabs>
       <StatusBar style={resolvedMode === "dark" ? "light" : "dark"} />
     </>
@@ -110,6 +113,11 @@ function ThemedTabs() {
 function ThemedRoot() {
   const { colors, resolvedMode, loading } = useTheme();
   const [showSplash, setShowSplash] = useState(!hasShownGlobalSplash);
+
+  useEffect(() => {
+    const unsub = watchAuthAndSyncProfile();
+    return unsub;
+  }, []);
 
   useEffect(() => {
     if (Platform.OS === "web") {
@@ -141,12 +149,11 @@ function ThemedRoot() {
   function handleSplashDone() {
     hasShownGlobalSplash = true;
     setShowSplash(false);
-    // Delay color switch until after splash fully fades
     if (Platform.OS === "web") {
       setTimeout(() => {
         document.body.style.backgroundColor = colors.bg;
         document.querySelector('meta[name="theme-color"]')?.setAttribute("content", colors.bg);
-      }, 600); // matches fade-out duration
+      }, 600);
     }
   }
 
