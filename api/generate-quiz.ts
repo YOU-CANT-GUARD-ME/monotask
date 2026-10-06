@@ -97,14 +97,15 @@ export default async function handler(req: any, res: any) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: difficulty === "hard" ? "gpt-4o" : "gpt-4o-mini",
+        model: "gpt-5.6-terra",
+        reasoning_effort: difficulty === "hard" ? "medium" : "low",
         messages: [
           {
             role: "user",
             content: makePrompt(noteText, aiSummary, subject, difficulty),
           },
         ],
-        max_tokens: 1500,
+        max_completion_tokens: 6000,
         response_format: { type: "json_object" },
       }),
     });

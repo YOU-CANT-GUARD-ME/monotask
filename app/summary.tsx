@@ -1,7 +1,7 @@
 // app/summary.tsx
 import AppIcon from "../components/AppIcon";
 import * as ImageManipulator from "expo-image-manipulator";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { syncMyLeaderboardEntry } from "../utils/leaderboard";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -35,6 +35,7 @@ export type StudySession = {
   subject?: string;
   photoUri?: string;       // legacy single photo
   photoUris?: string[];    // new multi-photo
+  isPublic?: boolean;
 };
 
 export async function loadSessions(): Promise<StudySession[]> {
@@ -61,18 +62,23 @@ function parsePhotoUris(raw?: string): string[] {
 }
 
 function formatMs(ms: number): string {
-  const totalMins = Math.floor(ms / 60000);
-  const h = Math.floor(totalMins / 60);
-  const m = totalMins % 60;
+  const totalSecs = Math.floor(ms / 1000);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const sec = totalSecs % 60;
+
   if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m`;
-  return "0m";
+  if (m > 0) return sec > 0 ? `${m}m ${sec}s` : `${m}m`;
+  return sec > 0 ? `${sec}s` : "0m";
 }
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
 }
+
+const MONOTASK_API_BASE_URL =
+  Platform.OS === "web" ? "" : "https://monotask-lock-in.vercel.app";
 
 // ─── AI Summary with multiple photos ─────────────────────────────────────────
 
@@ -116,13 +122,10 @@ async function imageContentFor(photoUri: string): Promise<any | null> {
   }
 }
 
-async function fetchAiSummary(
+export async function fetchAiSummary(
   noteText: string,
   photoUris: string[]
 ): Promise<string> {
-  const OPENAI_API_KEY =
-    "REMOVED_OPENAI_KEY";
-
   const hasPhotos = photoUris.length > 0;
 
   if (!noteText.trim() && !hasPhotos) {
@@ -138,84 +141,35 @@ async function fetchAiSummary(
 
   console.log("📸 photos sent to AI:", imageBlocks.length, "/", photoUris.length);
 
-  const prompt = hasPhotos
-    ? `당신은 학습 도우미입니다. 학생이 공부 세션을 마쳤고, ${imageBlocks.length}장의 사진과 노트를 첨부했습니다.
-
-먼저 모든 사진을 순서대로 자세히 보고 거기에 적힌 글씨, 다이어그램, 표, 공식 등 모든 내용을 읽어내세요. 손글씨여도 최선을 다해 읽으세요. 여러 사진이 있다면 사진들이 연관된 내용일 수도 있다는 점을 고려하세요.
-
-${noteText.trim() ? `학생이 추가로 작성한 노트:\n"${noteText}"` : "학생이 작성한 노트는 없습니다."}
-
-사진에서 읽어낸 모든 내용과 노트를 종합해서 학습 요약을 한국어로 작성해주세요. 사진의 내용이 중심이 되어야 합니다.
-
-형식:
-
-📚 주요 주제
-- 사진과 노트에서 다룬 핵심 주제 2~3개
-
-💡 핵심 개념 / 내용
-- 사진에 적힌 중요한 개념, 정의, 공식, 예시를 구체적으로 정리 (3~6개)
-
-❓ 복습 질문
-1. 사진의 내용을 활용한 자기 테스트 질문 2~3개
-
-만약 일부 사진을 읽을 수 없거나 글씨를 알아볼 수 없다면, 솔직하게 그렇게 말해주세요.`
-    : noteText.trim().length > 0
-    ? `당신은 학습 도우미입니다.
-
-학생 노트:
-
-"${noteText}"
-
-이 노트를 바탕으로 간결하고 구조화된 학습 요약을 한국어로 작성해주세요.
-
-형식:
-
-📚 주요 주제
-- 핵심 주제 2~3개
-
-💡 핵심 개념
-- 중요한 개념 / 정의 / 공식 2~3개
-
-❓ 복습 질문
-1. 자기 테스트 질문 2개`
-    : `학생이 공부 세션을 완료했지만 노트나 사진이 없습니다.
-
-다음 공부 때 노트나 사진을 남기면 더 좋은 요약을 받을 수 있다고 짧게 격려해주세요.`;
-
-  const messagesContent: any[] = [{ type: "text", text: prompt }, ...imageBlocks];
-
   const controller = new AbortController();
   // Give more time for multiple images
   const timeoutMs = hasPhotos ? 60000 : 45000;
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Calls our own Vercel API route so the OpenAI key stays on the server.
+    const response = await fetch(`${MONOTASK_API_BASE_URL}/api/generate-summary`, {
       method: "POST",
       signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
-      body: JSON.stringify({
-        model: hasPhotos ? "gpt-4o" : "gpt-4o-mini",
-        messages: [{ role: "user", content: messagesContent }],
-        max_tokens: 1000,
-      }),
+      body: JSON.stringify({ noteText, imageBlocks }),
     });
 
     clearTimeout(timeout);
 
+    const data = await response.json();
+
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API Error ${response.status}: ${errorText}`);
+      const message =
+        typeof data?.error === "string"
+          ? data.error
+          : JSON.stringify(data?.error || data);
+      throw new Error(`API Error ${response.status}: ${message}`);
     }
 
-    const data = await response.json();
-    return (
-      data?.choices?.[0]?.message?.content?.trim() ||
-      "요약을 생성할 수 없습니다."
-    );
+    return data?.summary?.trim() || "요약을 생성할 수 없습니다.";
   } catch (error: any) {
     clearTimeout(timeout);
     if (error?.name === "AbortError") {
@@ -356,8 +310,9 @@ function SaveToast({
 
 export default function SummaryScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { width } = useWindowDimensions();
-  const { colors } = useTheme();
+  const { colors, resolvedMode } = useTheme();
 
   const scale = width / 390;
   const rs = (n: number) => Math.round(n * scale);
@@ -375,6 +330,7 @@ export default function SummaryScreen() {
     photoUris?: string;
     subject?: string;
     sessionId?: string;
+    isPublic?: string;
   }>();
 
   const noteText = params.noteText || "";
@@ -383,6 +339,7 @@ export default function SummaryScreen() {
   const photoUris = parsePhotoUris(params.photoUris);
   const subject = params.subject || "기타";
   const sessionId = useRef(params.sessionId || Date.now().toString()).current;
+  const isPublic = params.isPublic === "true";
 
   const runFetch = (cancelled: { value: boolean }) => {
     setAiLoading(true);
@@ -392,7 +349,7 @@ export default function SummaryScreen() {
       .then(async (summary) => {
         // If the screen was cancelled *before* the AI response came back, stop.
         if (cancelled.value) return;
-        
+
         setAiSummary(summary);
         setAiLoading(false);
 
@@ -413,6 +370,7 @@ export default function SummaryScreen() {
           aiSummary: summary || "",
           subject: subject || "기타",
           photoUris: uploadedUrls,
+          isPublic,
         });
       })
       .then(() => {
@@ -430,6 +388,39 @@ export default function SummaryScreen() {
         }
       });
   };
+
+  useEffect(() => {
+    const tabBarBackground = resolvedMode === "dark" ? colors.bg : colors.primary;
+
+    const defaultTabBarStyle = {
+      backgroundColor: tabBarBackground,
+      borderTopColor:
+        resolvedMode === "dark" ? "rgba(255,255,255,0.08)" : colors.primaryDark,
+      borderTopWidth: 1,
+      height: Platform.OS === "web" ? ("88px" as any) : 80,
+      paddingTop: 6,
+      paddingBottom: Platform.OS === "web" ? ("6px" as any) : 6,
+      zIndex: 9999,
+      elevation: 20,
+    };
+
+    navigation.setOptions({
+      tabBarStyle: aiLoading ? { display: "none" } : defaultTabBarStyle,
+    });
+
+    // Unlike unmount, 'blur' reliably fires when navigating away from this
+    // screen — even though tab screens stay mounted in the background and
+    // never actually unmount. Without this, the override set above can
+    // silently persist and bleed into other tabs.
+    const unsubscribeBlur = navigation.addListener("blur", () => {
+      navigation.setOptions({ tabBarStyle: defaultTabBarStyle });
+    });
+
+    return () => {
+      unsubscribeBlur();
+      navigation.setOptions({ tabBarStyle: undefined });
+    };
+  }, [aiLoading, navigation, resolvedMode, colors]);
 
   useEffect(() => {
     setAiSummary("");
@@ -626,7 +617,7 @@ export default function SummaryScreen() {
 
   return (
     <SafeAreaView style={s.safe}
-      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+      edges={Platform.OS === "web" ? [] : ["top"]}
     >
       <ScrollView
         style={s.bg}
@@ -707,35 +698,37 @@ export default function SummaryScreen() {
           )}
         </View>
 
-        <View style={s.btnRow}>
-          <TouchableOpacity
-            style={s.homeBtn}
-            onPress={() => {
-              setAiSummary("");
-              setAiError(null);
-              setToastVisible(false);
-              router.replace("/");
-            }}
-            activeOpacity={0.85}
-          >
-            <AppIcon name="home-outline" size={rs(16)} color={colors.text} />
-            <Text style={s.homeBtnText}>홈</Text>
-          </TouchableOpacity>
+        {!aiLoading && (
+          <View style={s.btnRow}>
+            <TouchableOpacity
+              style={s.homeBtn}
+              onPress={() => {
+                setAiSummary("");
+                setAiError(null);
+                setToastVisible(false);
+                router.replace("/");
+              }}
+              activeOpacity={0.85}
+            >
+              <AppIcon name="home-outline" size={rs(16)} color={colors.text} />
+              <Text style={s.homeBtnText}>홈</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={s.historyBtn}
-            onPress={() => {
-              setAiSummary("");
-              setAiError(null);
-              setToastVisible(false);
-              router.replace("/history");
-            }}
-            activeOpacity={0.85}
-          >
-            <AppIcon name="time-outline" size={rs(16)} color={colors.onPrimary} />
-            <Text style={s.historyBtnText}>학습 기록 보기</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity
+              style={s.historyBtn}
+              onPress={() => {
+                setAiSummary("");
+                setAiError(null);
+                setToastVisible(false);
+                router.replace("/history");
+              }}
+              activeOpacity={0.85}
+            >
+              <AppIcon name="time-outline" size={rs(16)} color={colors.onPrimary} />
+              <Text style={s.historyBtnText}>학습 기록 보기</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
 
       <SaveToast
