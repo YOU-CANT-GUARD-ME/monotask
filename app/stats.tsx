@@ -45,13 +45,14 @@ function startOfDay(ts: number): number {
 }
 
 function formatHm(ms: number): string {
-  const totalMins = Math.floor(ms / 60000);
-  const h = Math.floor(totalMins / 60);
-  const m = totalMins % 60;
-  if (h > 0 && m > 0) return `${h}h ${m}m`;
-  if (h > 0) return `${h}h`;
-  if (m > 0) return `${m}m`;
-  return "0m";
+  const totalSecs = Math.floor(ms / 1000);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const sec = totalSecs % 60;
+
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return sec > 0 ? `${m}m ${sec}s` : `${m}m`;
+  return sec > 0 ? `${sec}s` : "0m";
 }
 
 function initialsOf(name: string): string {
@@ -464,7 +465,7 @@ const lbValueFor = (e: LeaderboardEntry) =>
   const s = StyleSheet.create({
     safe: { flex: 1, backgroundColor: colors.bg },
     scroll: { flex: 1 },
-    scrollContent: { paddingBottom: rs(48) },
+    scrollContent: { paddingBottom: rs(48), flexGrow: 1 },
 
     header: {
       paddingHorizontal: rs(24),
@@ -780,7 +781,7 @@ const lbValueFor = (e: LeaderboardEntry) =>
 
   return (
     <SafeAreaView style={s.safe}
-      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+      edges={Platform.OS === "web" ? [] : ["top"]}
     >
       <Animated.ScrollView
         style={[s.scroll, { opacity: fadeAnim }]}

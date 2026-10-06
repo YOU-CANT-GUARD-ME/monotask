@@ -54,3 +54,6 @@ serviceAccountKey.json
 # Vercel / local
 .vercel
 dist
+
+# Gradle build cache
+.gradle/

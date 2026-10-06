@@ -19,6 +19,7 @@ export type Session = {
   aiSummary?: string;
   photoUri?: string;
   photoUris?: string[];
+  isPublic?: boolean;
   createdAt?: number;
   updatedAt?: number;
 };
@@ -81,6 +82,7 @@ export async function saveSession(
     aiSummary: session.aiSummary ?? "",
     photoUri: session.photoUri ?? "",
     photoUris: session.photoUris ?? [],
+    isPublic: session.isPublic ?? false,
     createdAt: session.createdAt ?? now,
     updatedAt: now,
   };
@@ -93,6 +95,21 @@ export async function saveSession(
     console.log("Firestore save success");
   } catch (error) {
     console.error("saveSession error:", error);
+  }
+}
+
+export async function updateSessionVisibility(
+  sessionId: string,
+  isPublic: boolean
+): Promise<void> {
+  const ref = sessionDocRef(sessionId);
+  if (!ref) return;
+
+  try {
+    await setDoc(ref, { isPublic, updatedAt: Date.now() }, { merge: true });
+    console.log("Updated session visibility:", sessionId, isPublic);
+  } catch (error) {
+    console.error("updateSessionVisibility error:", error);
   }
 }
 

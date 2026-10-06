@@ -1,15 +1,19 @@
 // app/index.tsx
 import AppIcon from "../components/AppIcon";
+import TimeWheelPicker from "../components/DurationPicker";
 import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Platform,
   Animated,
   Easing,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -21,15 +25,19 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
 import LoginRequiredModal from "../components/LoginRequiredModal";
 
+const ACTIVE_FOCUS_SESSION_KEY = "monotask_active_focus_session_v1";
 let hasShownSplash = false;
 
+
 function formatMs(ms: number): string {
-  const totalMins = Math.floor(ms / 60000);
-  const h = Math.floor(totalMins / 60);
-  const m = totalMins % 60;
+  const totalSecs = Math.floor(ms / 1000);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const sec = totalSecs % 60;
+
   if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m`;
-  return "0m";
+  if (m > 0) return sec > 0 ? `${m}m ${sec}s` : `${m}m`;
+  return sec > 0 ? `${sec}s` : "0m";
 }
 
 function getGreeting(): string {
@@ -150,8 +158,217 @@ function SplashOverlay({ onDone }: { onDone: () => void }) {
   );
 }
 
+type SessionMode = "stopwatch" | "timer";
+
+function ModeButton({
+  label,
+  selected,
+  onPress,
+  rs,
+  colors,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  rs: (n: number) => number;
+  colors: any;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    Animated.spring(scale, {
+      toValue: 0.94,
+      speed: 50,
+      bounciness: 0,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scale, {
+      toValue: 1,
+      speed: 30,
+      bounciness: 8,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  return (
+    <Animated.View style={{ flex: 1, transform: [{ scale }] }}>
+      <TouchableOpacity
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        activeOpacity={1}
+        style={{
+          alignItems: "center",
+          paddingVertical: rs(12),
+          borderRadius: rs(11),
+          backgroundColor: selected ? colors.bg : "transparent",
+        }}
+      >
+        <Text
+          style={{
+            fontSize: rs(14),
+            fontWeight: "700",
+            color: selected ? colors.text : colors.textFaint,
+          }}
+        >
+          {label}
+        </Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+function StartSessionModal({
+  visible,
+  onClose,
+  onConfirm,
+  rs,
+  colors,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onConfirm: (mode: SessionMode, totalMs: number) => void;
+  rs: (n: number) => number;
+  colors: any;
+}) {
+  const [mode, setMode] = useState<SessionMode>("stopwatch");
+  const [hours, setHours] = useState(0);
+  const [minutes, setMinutes] = useState(0);
+  const [seconds, setSeconds] = useState(0);
+
+  useEffect(() => {
+    if (visible) {
+      setMode("stopwatch");
+      setHours(0);
+      setMinutes(0);
+      setSeconds(0);
+    }
+  }, [visible]);
+
+  const totalMs = (hours * 3600 + minutes * 60 + seconds) * 1000;
+  const MIN_TIMER_MS = 60 * 1000;
+  const canStart = mode === "stopwatch" || totalMs > MIN_TIMER_MS;
+
+  const s = StyleSheet.create({
+    backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
+    sheet: {
+      backgroundColor: colors.bg,
+      borderTopLeftRadius: rs(28),
+      borderTopRightRadius: rs(28),
+      paddingHorizontal: rs(24),
+      paddingTop: rs(20),
+      paddingBottom: rs(40),
+    },
+    handle: {
+      width: rs(36),
+      height: rs(4),
+      borderRadius: 999,
+      backgroundColor: colors.border,
+      alignSelf: "center",
+      marginBottom: rs(20),
+    },
+    title: { fontSize: rs(20), fontWeight: "800", color: colors.text, marginBottom: rs(4) },
+    sub: { fontSize: rs(13), color: colors.textFaint, marginBottom: rs(20) },
+    modeRow: {
+      flexDirection: "row",
+      backgroundColor: colors.surface,
+      borderRadius: rs(14),
+      padding: rs(4),
+      marginBottom: rs(20),
+    },
+    pickerLabel: {
+      fontSize: rs(11),
+      color: colors.textFaint,
+      fontWeight: "700",
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: rs(8),
+      textAlign: "center",
+    },
+    startBtn: {
+      backgroundColor: colors.primary,
+      borderRadius: rs(20),
+      paddingVertical: rs(16),
+      alignItems: "center",
+      marginTop: rs(20),
+    },
+    startBtnDisabled: { opacity: 0.4 },
+    startBtnText: { color: colors.onPrimary, fontWeight: "800", fontSize: rs(15) },
+  });
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={s.backdrop}>
+        <TouchableWithoutFeedback onPress={onClose}>
+          <View style={StyleSheet.absoluteFill} />
+        </TouchableWithoutFeedback>
+
+        <View style={s.sheet}>
+          <View style={s.handle} />
+          <Text style={s.title}>집중 세션 시작</Text>
+          <Text style={s.sub}>스톱워치 또는 타이머 중에서 선택하세요</Text>
+
+          <View style={s.modeRow}>
+            <ModeButton
+              label="스톱워치"
+              selected={mode === "stopwatch"}
+              onPress={() => setMode("stopwatch")}
+              rs={rs}
+              colors={colors}
+            />
+            <ModeButton
+              label="타이머"
+              selected={mode === "timer"}
+              onPress={() => setMode("timer")}
+              rs={rs}
+              colors={colors}
+            />
+          </View>
+
+          {mode === "timer" && (
+            <>
+              <Text style={s.pickerLabel}>시간 설정</Text>
+              <TimeWheelPicker
+                hours={hours}
+                minutes={minutes}
+                seconds={seconds}
+                onChange={(h, m, sec) => {
+                  setHours(h);
+                  setMinutes(m);
+                  setSeconds(sec);
+                }}
+                rs={rs}
+                resetKey={visible ? 1 : 0}
+              />
+            </>
+          )}
+
+          {mode === "timer" && totalMs > 0 && totalMs < MIN_TIMER_MS && (
+            <Text style={{ fontSize: rs(12), color: colors.danger, textAlign: "center", marginTop: rs(8) }}>
+              최소 1분 이상 설정해주세요
+            </Text>
+          )}
+
+          <TouchableOpacity
+            style={[s.startBtn, !canStart && s.startBtnDisabled]}
+            disabled={!canStart}
+            onPress={() => onConfirm(mode, totalMs)}
+            activeOpacity={0.85}
+          >
+            <Text style={s.startBtnText}>시작하기</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function HomeScreen() {
   const [showLoginRequired, setShowLoginRequired] = useState(false);
+  const [showStartModal, setShowStartModal] = useState(false);
   const { width } = useWindowDimensions();
 
   // Web can briefly report width as 0 during first render.
@@ -161,7 +378,7 @@ export default function HomeScreen() {
   const rs = (n: number) => Math.max(1, Math.round(n * scale));
   const router = useRouter();
   const { colors } = useTheme();
-  
+
   const [splashDone, setSplashDone] = useState(hasShownSplash);
   const [isLoggedIn, setIsLoggedIn] = useState(!!auth.currentUser);
 
@@ -192,6 +409,20 @@ export default function HomeScreen() {
   function showLoginRequiredAlert() {
     setShowLoginRequired(true);
   }
+
+function handleConfirmStart(mode: SessionMode, totalMs: number) {
+  setShowStartModal(false);
+  AsyncStorage.removeItem(ACTIVE_FOCUS_SESSION_KEY).finally(() => {
+    router.push({
+      pathname: "/focus",
+      params: {
+        sessionId: Date.now().toString(),
+        mode,
+        ...(mode === "timer" ? { targetMs: String(totalMs) } : {}),
+      },
+    });
+  });
+}
 
   const s = StyleSheet.create({
     safe: { flex: 1, backgroundColor: colors.bg },
@@ -308,23 +539,31 @@ export default function HomeScreen() {
   return (
     <SafeAreaView
       style={s.safe}
-    
+
       edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
     >
-  <ScrollView
-    style={{ flex: 1, backgroundColor: colors.bg }}
-    contentContainerStyle={{ flexGrow: 1, paddingBottom: rs(48) }}
-    showsVerticalScrollIndicator={false}
-  >
-  <View style={[s.container, { flexGrow: 1 }]}>
-      <LoginRequiredModal
-        visible={showLoginRequired}
-        onClose={() => setShowLoginRequired(false)}
-        onGoProfile={() => {
-          setShowLoginRequired(false);
-          router.push("/profile");
-        }}
-      />
+      <ScrollView
+        style={{ flex: 1, backgroundColor: colors.bg }}
+        contentContainerStyle={{ flexGrow: 1, paddingBottom: rs(48) }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={[s.container, { flexGrow: 1 }]}>
+          <LoginRequiredModal
+            visible={showLoginRequired}
+            onClose={() => setShowLoginRequired(false)}
+            onGoProfile={() => {
+              setShowLoginRequired(false);
+              router.push("/profile");
+            }}
+          />
+
+          <StartSessionModal
+            visible={showStartModal}
+            onClose={() => setShowStartModal(false)}
+            onConfirm={handleConfirmStart}
+            rs={rs}
+            colors={colors}
+          />
 
           <Text style={s.greeting}>{getGreeting()}</Text>
           <Text style={s.title}>집중할 준비 됐나요?</Text>
@@ -377,10 +616,7 @@ export default function HomeScreen() {
                 showLoginRequiredAlert();
                 return;
               }
-              router.push({
-                pathname: "/focus",
-                params: { sessionId: Date.now().toString() },
-              });
+              setShowStartModal(true);
             }}
           >
             <AppIcon name="play" size={rs(16)} color={colors.onPrimary} />

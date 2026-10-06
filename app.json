@@ -18,7 +18,16 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.youcantguardme.focusapp"
+      "package": "com.youcantguardme.focusapp",
+      "softwareKeyboardLayoutMode": "resize",
+      "permissions": [
+        "SYSTEM_ALERT_WINDOW",
+        "PACKAGE_USAGE_STATS",
+        "ACCESS_NOTIFICATION_POLICY",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_SPECIAL_USE",
+        "POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "output": "static",
@@ -40,7 +49,8 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -49,8 +59,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "a5a0046d-9cb2-435b-afd3-1571734ca4ab"
+        "projectId": "7df232b6-b502-41d0-94b2-0c825affb761"
       }
-    }
+    },
+    "owner": "you-cant-gaurd-me"
   }
 }

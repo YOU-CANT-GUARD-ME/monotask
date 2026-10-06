@@ -5,11 +5,14 @@ import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Modal,
   Platform,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -32,6 +35,8 @@ type FriendSession = {
   durationMs: number;
   subject?: string;
   noteText?: string;
+  aiSummary?: string;
+  isPublic?: boolean;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -55,6 +60,15 @@ function formatHm(ms: number): string {
 function formatDate(ts: number): string {
   const d = new Date(ts);
   return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
+}
+
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const h = d.getHours();
+  const m = d.getMinutes().toString().padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m} ${ampm}`;
 }
 
 function initialsOf(name: string): string {
@@ -123,6 +137,151 @@ function StatPill({
   );
 }
 
+// ─── Note Detail Modal ──────────────────────────────────────────────────────
+
+function NoteDetailModal({
+  session,
+  onClose,
+  rs,
+  colors,
+}: {
+  session: FriendSession | null;
+  onClose: () => void;
+  rs: (n: number) => number;
+  colors: ThemePalette;
+}) {
+  if (!session) return null;
+
+  const modal = StyleSheet.create({
+    backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)" },
+    sheet: {
+      backgroundColor: colors.bg,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      paddingHorizontal: 22,
+      paddingTop: 14,
+      maxHeight: "82%",
+    },
+    handle: {
+      width: 38,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: colors.border,
+      alignSelf: "center",
+      marginBottom: 18,
+    },
+    header: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+    },
+    headerTitle: { fontWeight: "800", color: colors.text, marginBottom: 3 },
+    headerSub: { color: colors.textFaint },
+    closeBtn: {
+      width: 34,
+      height: 34,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    infoRow: { flexDirection: "row" },
+    infoCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 18,
+      flex: 1,
+      gap: 5,
+    },
+    infoLabel: {
+      color: colors.textFaint,
+      fontWeight: "700",
+      textTransform: "uppercase",
+    },
+    infoValue: { color: colors.text, fontWeight: "800" },
+    sectionLabel: {
+      color: colors.textFaint,
+      fontWeight: "700",
+      textTransform: "uppercase",
+      marginBottom: 8,
+    },
+    contentCard: { backgroundColor: colors.surfaceAlt },
+    contentText: { color: colors.text },
+  });
+
+  return (
+    <Modal
+      visible={!!session}
+      transparent
+      animationType="slide"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <StatusBar hidden={false} />
+
+      <TouchableWithoutFeedback onPress={onClose}>
+        <View style={modal.backdrop} />
+      </TouchableWithoutFeedback>
+
+      <View style={[modal.sheet, { paddingBottom: rs(36) }]}>
+        <View style={modal.handle} />
+
+        <View style={[modal.header, { marginBottom: rs(18) }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={[modal.headerTitle, { fontSize: rs(18) }]}>
+              {session.subject || "공부 세션"}
+            </Text>
+            <Text style={[modal.headerSub, { fontSize: rs(12) }]}>
+              {formatDate(session.startTime)} · {formatTime(session.startTime)}
+            </Text>
+          </View>
+
+          <TouchableOpacity onPress={onClose} style={modal.closeBtn}>
+            <AppIcon name="close" size={rs(18)} color={colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={[modal.infoRow, { marginBottom: rs(20) }]}>
+          <View style={[modal.infoCard, { padding: rs(14) }]}>
+            <AppIcon name="time-outline" size={rs(18)} color={colors.primary} />
+            <Text style={[modal.infoLabel, { fontSize: rs(11) }]}>집중 시간</Text>
+            <Text style={[modal.infoValue, { fontSize: rs(18) }]}>
+              {formatHm(session.durationMs)}
+            </Text>
+          </View>
+        </View>
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: rs(20) }}
+        >
+          <Text style={[modal.sectionLabel, { fontSize: rs(11) }]}>작성한 노트</Text>
+          <View
+            style={[
+              modal.contentCard,
+              { borderRadius: rs(18), padding: rs(16), marginBottom: rs(18) },
+            ]}
+          >
+            <Text style={[modal.contentText, { fontSize: rs(14), lineHeight: rs(24) }]}>
+              {session.noteText?.trim() ? session.noteText : "작성된 노트가 없습니다."}
+            </Text>
+          </View>
+
+          {!!session.aiSummary?.trim() && (
+            <>
+              <Text style={[modal.sectionLabel, { fontSize: rs(11) }]}>AI 요약</Text>
+              <View style={[modal.contentCard, { borderRadius: rs(18), padding: rs(16) }]}>
+                <Text style={[modal.contentText, { fontSize: rs(14), lineHeight: rs(24) }]}>
+                  {session.aiSummary}
+                </Text>
+              </View>
+            </>
+          )}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
 // ─── Main Screen ────────────────────────────────────────────────────────────
 
 export default function FriendProfileScreen() {
@@ -137,6 +296,7 @@ export default function FriendProfileScreen() {
   const [sessions, setSessions] = useState<FriendSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedNote, setSelectedNote] = useState<FriendSession | null>(null);
 
   const load = useCallback(async () => {
     if (!uid) return;
@@ -162,6 +322,8 @@ export default function FriendProfileScreen() {
           durationMs: s.durationMs ?? 0,
           subject: s.subject,
           noteText: s.noteText,
+          aiSummary: s.aiSummary,
+          isPublic: s.isPublic === true,
         };
       });
       list.sort((a, b) => b.startTime - a.startTime);
@@ -201,8 +363,10 @@ export default function FriendProfileScreen() {
     return { totalMs, streak, todayMs, totalDays: dailyMap.size };
   }, [sessions]);
 
+  // Stats above are computed from ALL sessions regardless of visibility —
+  // only the notes list itself is restricted to sessions the person marked public.
   const notes = useMemo(
-    () => sessions.filter((s) => s.noteText?.trim()),
+    () => sessions.filter((s) => s.noteText?.trim() && s.isPublic === true),
     [sessions]
   );
 
@@ -361,10 +525,15 @@ export default function FriendProfileScreen() {
 
           <Text style={s.sectionLabel}>노트 ({notes.length})</Text>
           {notes.length === 0 ? (
-            <Text style={s.emptyText}>작성된 노트가 없어요</Text>
+            <Text style={s.emptyText}>공개된 노트가 없어요</Text>
           ) : (
             notes.map((n) => (
-              <View key={n.id} style={s.noteCard}>
+              <TouchableOpacity
+                key={n.id}
+                style={s.noteCard}
+                onPress={() => setSelectedNote(n)}
+                activeOpacity={0.75}
+              >
                 <View style={s.noteTopRow}>
                   <Text style={s.noteSubject}>{n.subject || "공부 세션"}</Text>
                   <Text style={s.noteDate}>{formatDate(n.startTime)}</Text>
@@ -372,11 +541,18 @@ export default function FriendProfileScreen() {
                 <Text style={s.noteText} numberOfLines={4}>
                   {n.noteText}
                 </Text>
-              </View>
+              </TouchableOpacity>
             ))
           )}
         </ScrollView>
       )}
+
+      <NoteDetailModal
+        session={selectedNote}
+        onClose={() => setSelectedNote(null)}
+        rs={rs}
+        colors={colors}
+      />
     </SafeAreaView>
   );
 }

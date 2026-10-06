@@ -100,7 +100,7 @@ function ThemedTabs() {
         <Tabs.Screen name="focus" options={{ href: null, tabBarStyle: { display: "none" } }} />
         <Tabs.Screen name="summary" options={{ href: null }} />
         <Tabs.Screen name="camera" options={{ href: null, tabBarStyle: { display: "none" } }} />
-        <Tabs.Screen name="study-end" options={{ href: null }} />
+        <Tabs.Screen name="study-end" options={{ href: null, tabBarStyle: { display: "none" } }} />
         <Tabs.Screen name="quiz" options={{ href: null, tabBarStyle: { display: "none" } }} />
         <Tabs.Screen name="reset-password" options={{ href: null, tabBarStyle: { display: "none" } }} />
         <Tabs.Screen name="friend-profile" options={{ href: null }} />

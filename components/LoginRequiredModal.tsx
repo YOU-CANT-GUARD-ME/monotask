@@ -24,21 +24,21 @@ export default function LoginRequiredModal({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={styles.card}>
-          <Text style={styles.title}>로그인이 필요해요</Text>
+        <View style={[styles.card, { backgroundColor: colors.bg }]}>
+          <Text style={[styles.title, { color: colors.text }]}>로그인이 필요해요</Text>
 
-          <Text style={styles.body}>
+          <Text style={[styles.body, { color: colors.textMuted }]}>
             집중 세션을 저장하려면 먼저 로그인해주세요.{"\n"}
             프로필 화면에서 로그인할 수 있어요.
           </Text>
 
           <View style={styles.buttonRow}>
             <TouchableOpacity
-              style={styles.cancelButton}
+              style={[styles.cancelButton, { backgroundColor: colors.primarySoft }]}
               onPress={onClose}
               activeOpacity={0.85}
             >
-              <Text style={styles.cancelButtonText}>취소</Text>
+              <Text style={[styles.cancelButtonText, { color: colors.primaryDark }]}>취소</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -46,7 +46,7 @@ export default function LoginRequiredModal({
               onPress={onGoProfile}
               activeOpacity={0.85}
             >
-              <Text style={styles.confirmButtonText}>프로필로 가기</Text>
+              <Text style={[styles.confirmButtonText, { color: colors.onPrimary }]}>프로필로 가기</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -66,20 +66,17 @@ const styles = StyleSheet.create({
   card: {
     width: "100%",
     maxWidth: 360,
-    backgroundColor: "#F4F1EA",
     borderRadius: 24,
     padding: 22,
   },
   title: {
     fontSize: 20,
     fontWeight: "800",
-    color: "#26221A",
     marginBottom: 8,
   },
   body: {
     fontSize: 14,
     lineHeight: 21,
-    color: "#5F654F",
     marginBottom: 20,
   },
   buttonRow: {
@@ -91,12 +88,10 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: "center",
-    backgroundColor: "rgba(135,152,106,0.16)",
   },
   cancelButtonText: {
     fontSize: 14,
     fontWeight: "800",
-    color: "#6A7A52",
   },
   confirmButton: {
     flex: 1,
@@ -107,6 +102,5 @@ const styles = StyleSheet.create({
   confirmButtonText: {
     fontSize: 14,
     fontWeight: "800",
-    color: "#F4F1EA",
   },
 });

@@ -61,7 +61,7 @@ type User = {
 
 type ModalType =
   | "login"
-  | "signup" 
+  | "signup"
   | "editProfile"
   | "changePassword"
   | "notifications"
@@ -139,7 +139,7 @@ function Sheet({
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
         <View
@@ -736,10 +736,10 @@ function ChangePasswordModal({
         style={[
           inputStyle,
           confirm.length > 0 &&
-            next !== confirm && {
-              borderWidth: 1,
-              borderColor: colors.danger,
-            },
+          next !== confirm && {
+            borderWidth: 1,
+            borderColor: colors.danger,
+          },
         ]}
         placeholder="••••••••"
         placeholderTextColor={colors.textFaint}
@@ -1304,7 +1304,7 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={s.safe}
-      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+      edges={Platform.OS === "web" ? [] : ["top"]}
     >
       <View style={s.header}>
         <Text style={s.headerTitle}>프로필</Text>

@@ -36,12 +36,14 @@ function parsePhotoUris(raw?: string): string[] {
 }
 
 function formatMs(ms: number): string {
-  const totalMins = Math.floor(ms / 60000);
-  const h = Math.floor(totalMins / 60);
-  const m = totalMins % 60;
+  const totalSecs = Math.floor(ms / 1000);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const sec = totalSecs % 60;
+
   if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m`;
-  return "0m";
+  if (m > 0) return sec > 0 ? `${m}m ${sec}s` : `${m}m`;
+  return sec > 0 ? `${sec}s` : "0m";
 }
 
 function formatStartTime(iso: string): string {
@@ -83,6 +85,8 @@ export default function StudyEndScreen() {
   const [screen, setScreen] = useState<Screen>(isAddNoteMode ? "note" : "end");
   const [noteText, setNoteText] = useState("");
   const [subject, setSubject] = useState("");
+  const [isPublic, setIsPublic] = useState(false);
+
   const [photoUris, setPhotoUris] = useState<string[]>(
     parsePhotoUris(params.photoUris)
   );
@@ -373,6 +377,18 @@ export default function StudyEndScreen() {
     subjectChipTextSelected: {
       color: colors.onPrimary,
     },
+    subjectInputWrapper: {
+      backgroundColor: colors.surface,
+      borderRadius: rs(14),
+      paddingHorizontal: rs(16),
+      paddingVertical: rs(12),
+      marginBottom: rs(20),
+    },
+    subjectInput: {
+      fontSize: rs(14),
+      color: colors.text,
+      fontWeight: "600",
+    },
 
     photosLabel: {
       fontSize: rs(11),
@@ -425,6 +441,40 @@ export default function StudyEndScreen() {
       fontWeight: "600",
     },
 
+    visibilityRow: {
+      flexDirection: "row",
+      gap: rs(12),
+      marginTop: rs(8),
+      marginBottom: rs(12),
+    },
+
+    visibilityButton: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      paddingVertical: rs(14),
+      borderRadius: rs(14),
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+
+    visibilityButtonActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+
+    visibilityText: {
+      marginLeft: rs(8),
+      color: colors.text,
+      fontWeight: "600",
+    },
+
+    visibilityTextActive: {
+      color: colors.onPrimary,
+    },
+
     primaryBtn: {
       backgroundColor: colors.primary,
       padding: rs(18),
@@ -469,8 +519,8 @@ export default function StudyEndScreen() {
   if (screen === "end") {
     return (
       <SafeAreaView style={s.safe}
-      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
-    >
+        edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+      >
         <ScrollView
           style={s.bg}
           contentContainerStyle={s.endScroll}
@@ -522,16 +572,6 @@ export default function StudyEndScreen() {
               <Text style={s.choiceBtnDesc}>알림으로 나중에 안내</Text>
             </TouchableOpacity>
           </View>
-
-          <TouchableOpacity
-            style={s.skipBtn}
-            onPress={() => {
-              savePendingSession();
-              router.replace("/");
-            }}
-          >
-            <Text style={s.skipText}>그냥 홈으로 가기</Text>
-          </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
     );
@@ -541,8 +581,8 @@ export default function StudyEndScreen() {
   if (screen === "later") {
     return (
       <SafeAreaView style={s.safe}
-      edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
-    >
+        edges={Platform.OS === "web" ? [] : ["top", "right", "bottom", "left"]}
+      >
         <View style={s.bg}>
           <View style={s.laterWrap}>
             <View style={s.laterBadge}>
@@ -597,29 +637,16 @@ export default function StudyEndScreen() {
           <Text style={s.noteScreenTitle}>복습 노트 작성</Text>
           <Text style={s.noteDate}>{formatDate(startTime)} · 오늘 공부</Text>
         </View>
-
         <Text style={s.subjectLabel}>과목</Text>
-        <View style={s.subjectRow}>
-          {SUBJECT_OPTIONS.map((opt) => {
-            const selected = subject === opt;
-            return (
-              <TouchableOpacity
-                key={opt}
-                onPress={() => setSubject(opt)}
-                activeOpacity={0.8}
-                style={[s.subjectChip, selected && s.subjectChipSelected]}
-              >
-                <Text
-                  style={[
-                    s.subjectChipText,
-                    selected && s.subjectChipTextSelected,
-                  ]}
-                >
-                  {opt}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+        <View style={s.subjectInputWrapper}>
+          <TextInput
+            style={s.subjectInput}
+            placeholder="과목을 입력하세요"
+            placeholderTextColor={colors.textFaint}
+            value={subject}
+            onChangeText={setSubject}
+            maxLength={20}
+          />
         </View>
 
         <View style={s.noteInputWrapper}>
@@ -670,6 +697,52 @@ export default function StudyEndScreen() {
           )}
         </View>
 
+        <View style={s.visibilityRow}>
+          <TouchableOpacity
+            style={[
+              s.visibilityButton,
+              !isPublic && s.visibilityButtonActive,
+            ]}
+            onPress={() => setIsPublic(false)}
+          >
+            <AppIcon
+              name="lock"
+              size={18}
+              color={!isPublic ? colors.onPrimary : colors.text}
+            />
+            <Text
+              style={[
+                s.visibilityText,
+                !isPublic && s.visibilityTextActive,
+              ]}
+            >
+              비공개
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              s.visibilityButton,
+              isPublic && s.visibilityButtonActive,
+            ]}
+            onPress={() => setIsPublic(true)}
+          >
+            <AppIcon
+              name="globe"
+              size={18}
+              color={isPublic ? colors.onPrimary : colors.text}
+            />
+            <Text
+              style={[
+                s.visibilityText,
+                isPublic && s.visibilityTextActive,
+              ]}
+            >
+              공개
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         <TouchableOpacity
           style={[s.primaryBtn, !noteText.trim() && s.primaryBtnDisabled, { marginTop: rs(8) }]}
           disabled={!noteText.trim()}
@@ -684,6 +757,7 @@ export default function StudyEndScreen() {
                 photoUris: JSON.stringify(photoUris),
                 subject,
                 sessionId,
+                isPublic: String(isPublic),
               },
             })
           }

@@ -141,6 +141,15 @@ export default function AppIcon({ name, size = 24, color = "#26221A", style }: P
     );
   }
 
+  if (["create", "pencil"].includes(n)) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
+      <Path d="M15.5 4.5L19.5 8.5L8 20H4V16L15.5 4.5Z" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+      <Line x1="13.5" y1="6.5" x2="17.5" y2="10.5" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
   if (["help-circle", "information-circle", "alert-circle"].includes(n)) {
     return (
       <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
@@ -262,6 +271,38 @@ export default function AppIcon({ name, size = 24, color = "#26221A", style }: P
     );
   }
 
+  if (["globe", "earth", "public"].includes(n)) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
+      <Circle
+        cx="12"
+        cy="12"
+        r="8"
+        stroke={color}
+        strokeWidth={2.2}
+      />
+      <Path
+        d="M4 12H20"
+        stroke={color}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M12 4C14.2 6.2 15.2 9 15.2 12C15.2 15 14.2 17.8 12 20"
+        stroke={color}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M12 4C9.8 6.2 8.8 9 8.8 12C8.8 15 9.8 17.8 12 20"
+        stroke={color}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
   if (["bulb"].includes(n)) {
     return (
       <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
@@ -289,6 +330,39 @@ export default function AppIcon({ name, size = 24, color = "#26221A", style }: P
       </Svg>
     );
   }
+
+  if (["search"].includes(n)) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
+      <Circle cx="10.5" cy="10.5" r="6.5" stroke={color} strokeWidth={2.2} />
+      <Line x1="15.3" y1="15.3" x2="20" y2="20" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+if (["people", "group", "users"].includes(n)) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
+      {/* Left person */}
+      <Circle cx="9" cy="9" r="2.5" stroke={color} strokeWidth={2.2} />
+      <Path
+        d="M5.8 18C6.2 15.8 7.6 14.5 9.5 14.5C11.4 14.5 12.8 15.8 13.2 18"
+        stroke={color}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+      />
+
+      {/* Right person */}
+      <Circle cx="16" cy="10" r="2.2" stroke={color} strokeWidth={2.2} />
+      <Path
+        d="M13.8 18C14.1 16.3 15.2 15.2 16.8 15.2C18.4 15.2 19.5 16.3 19.8 18"
+        stroke={color}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
 
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>

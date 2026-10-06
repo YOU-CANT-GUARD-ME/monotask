@@ -1,18 +1,18 @@
 // app/history.tsx
 import AppIcon from "../components/AppIcon";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
-  Animated,
   Image,
   Modal,
   Platform,
-  PanResponder,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   useWindowDimensions,
@@ -22,16 +22,18 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemePalette } from "../constants/themes";
 import { useTheme } from "../contexts/ThemeContext";
-import { getQuizAttempts, QuizAttempt } from "../utils/storage";
-import { deleteSession, loadSessions, StudySession } from "./summary";
+import { getQuizAttempts, QuizAttempt, saveSession, updateSessionVisibility } from "../utils/storage";
+import { deleteSession, fetchAiSummary, loadSessions, StudySession } from "./summary";
 
 function formatMs(ms: number): string {
-  const totalMins = Math.floor(ms / 60000);
-  const h = Math.floor(totalMins / 60);
-  const m = totalMins % 60;
+  const totalSecs = Math.floor(ms / 1000);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const sec = totalSecs % 60;
+
   if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m`;
-  return "0m";
+  if (m > 0) return sec > 0 ? `${m}m ${sec}s` : `${m}m`;
+  return sec > 0 ? `${sec}s` : "0m";
 }
 
 function formatDate(iso: string): string {
@@ -78,12 +80,16 @@ function DetailModal({
   session,
   onClose,
   onDelete,
+  onNoteSaved,
+  onToggleVisibility,
   rs,
   colors,
 }: {
   session: StudySession | null;
   onClose: () => void;
   onDelete: (id: string) => void;
+  onNoteSaved: () => void;
+  onToggleVisibility: (id: string, isPublic: boolean) => void;
   rs: (n: number) => number;
   colors: ThemePalette;
 }) {
@@ -93,6 +99,18 @@ function DetailModal({
   const [attempts, setAttempts] = useState<QuizAttempt[]>([]);
   const [reviewAttempt, setReviewAttempt] = useState<QuizAttempt | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isEditingNote, setIsEditingNote] = useState(false);
+  const [editedNoteText, setEditedNoteText] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [regeneratingSummary, setRegeneratingSummary] = useState(false);
+  const [isEditingSummary, setIsEditingSummary] = useState(false);
+  const [editedSummaryText, setEditedSummaryText] = useState("");
+  const [savingSummary, setSavingSummary] = useState(false);
+  const [isPublic, setIsPublic] = useState(session?.isPublic ?? false);
+
+  React.useEffect(() => {
+    setIsPublic(session?.isPublic ?? false);
+  }, [session?.id]);
 
   React.useEffect(() => {
     if (!session) {
@@ -106,10 +124,10 @@ function DetailModal({
   }, [session?.id]);
 
   React.useEffect(() => {
-    if (session) {
-      console.log("photoUris:", session.photoUris);
-      console.log("photoUri:", session.photoUri);
-    }
+    setIsEditingNote(false);
+    setEditedNoteText(session?.noteText ?? "");
+    setIsEditingSummary(false);
+    setEditedSummaryText(session?.aiSummary ?? "");
   }, [session?.id]);
 
   if (!session) return null;
@@ -137,26 +155,90 @@ function DetailModal({
     }, 250);
   };
 
-  const handleAddNote = () => {
-    onClose();
-    setTimeout(() => {
-      router.push({
-        pathname: "/study-end",
-        params: {
-          sessionId: session.id,
-          mode: "addNote",
-          startTime: session.startTime,
-          durationMs: String(session.durationMs),
-          photoUris: JSON.stringify(
-            session.photoUris && session.photoUris.length > 0
-              ? session.photoUris
-              : session.photoUri
-                ? [session.photoUri]
-                : []
-          ),
-        },
+  async function handleToggleVisibility(next: boolean) {
+    setIsPublic(next);
+    await updateSessionVisibility(session!.id, next);
+    onToggleVisibility(session!.id, next);
+  }
+
+  const handleSaveNote = async () => {
+    if (!session) return;
+    setSavingNote(true);
+
+    const photoUris =
+      session.photoUris && session.photoUris.length > 0
+        ? session.photoUris
+        : session.photoUri
+          ? [session.photoUri]
+          : [];
+
+    try {
+      await saveSession({
+        id: session.id,
+        startTime: new Date(session.startTime).getTime(),
+        durationMs: session.durationMs,
+        subject: session.subject,
+        noteText: editedNoteText,
+        aiSummary: session.aiSummary,
+        photoUris,
       });
-    }, 250);
+      setIsEditingNote(false);
+      onNoteSaved();
+    } catch (e) {
+      console.warn("failed to save note:", e);
+      Alert.alert("오류", "노트를 저장하지 못했습니다.");
+      setSavingNote(false);
+      return;
+    }
+    setSavingNote(false);
+
+    setRegeneratingSummary(true);
+    try {
+      const newSummary = await fetchAiSummary(editedNoteText, photoUris);
+      await saveSession({
+        id: session.id,
+        startTime: new Date(session.startTime).getTime(),
+        durationMs: session.durationMs,
+        subject: session.subject,
+        noteText: editedNoteText,
+        aiSummary: newSummary,
+        photoUris,
+      });
+      onNoteSaved();
+    } catch (e) {
+      console.warn("failed to regenerate AI summary:", e);
+      Alert.alert("알림", "노트는 저장됐지만 AI 요약 생성에 실패했습니다.");
+    } finally {
+      setRegeneratingSummary(false);
+    }
+  };
+
+  const handleSaveSummary = async () => {
+    if (!session) return;
+    setSavingSummary(true);
+    try {
+      await saveSession({
+        id: session.id,
+        startTime: new Date(session.startTime).getTime(),
+        durationMs: session.durationMs,
+        subject: session.subject,
+        noteText: session.noteText,
+        aiSummary: editedSummaryText,
+        photoUris:
+          session.photoUris && session.photoUris.length > 0
+            ? session.photoUris
+            : session.photoUri
+              ? [session.photoUri]
+              : [],
+      });
+      setIsEditingSummary(false);
+      onNoteSaved();
+    } catch (e) {
+      console.warn("failed to save summary:", e);
+      Alert.alert("오류", "AI 요약을 저장하지 못했습니다.");
+    } finally {
+      setSavingSummary(false);
+    }
   };
 
   const modal = StyleSheet.create({
@@ -257,13 +339,18 @@ function DetailModal({
     },
     fsImage: { width: "100%", height: "80%" },
 
-    // Custom Popups Style Sheet Tokens
     popBackdrop: {
-      flex: 1,
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
       backgroundColor: "rgba(0, 0, 0, 0.5)",
       justifyContent: "center",
       alignItems: "center",
       paddingHorizontal: 24,
+      zIndex: 999,
+      elevation: 999,
     },
     popCard: {
       backgroundColor: colors.surface,
@@ -370,11 +457,52 @@ function DetailModal({
             </View>
           </View>
 
+          <View style={{ flexDirection: "row", gap: rs(10), marginBottom: rs(20) }}>
+            <TouchableOpacity
+              onPress={() => handleToggleVisibility(false)}
+              activeOpacity={0.85}
+              style={{
+                flex: 1,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: rs(6),
+                paddingVertical: rs(12),
+                borderRadius: rs(14),
+                backgroundColor: !isPublic ? colors.primary : colors.surface,
+              }}
+            >
+              <AppIcon name="lock" size={rs(15)} color={!isPublic ? colors.onPrimary : colors.text} />
+              <Text style={{ fontWeight: "700", fontSize: rs(13), color: !isPublic ? colors.onPrimary : colors.text }}>
+                비공개
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => handleToggleVisibility(true)}
+              activeOpacity={0.85}
+              style={{
+                flex: 1,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: rs(6),
+                paddingVertical: rs(12),
+                borderRadius: rs(14),
+                backgroundColor: isPublic ? colors.primary : colors.surface,
+              }}
+            >
+              <AppIcon name="globe" size={rs(15)} color={isPublic ? colors.onPrimary : colors.text} />
+              <Text style={{ fontWeight: "700", fontSize: rs(13), color: isPublic ? colors.onPrimary : colors.text }}>
+                공개
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: rs(20) }}
           >
-            {/* Photo Block with updated fallback layout */}
             {((session.photoUris && session.photoUris.length > 0) || session.photoUri) ? (
               <>
                 <Text style={[modal.sectionLabel, { fontSize: rs(11) }]}>
@@ -417,26 +545,184 @@ function DetailModal({
               </>
             ) : null}
 
-            <Text style={[modal.sectionLabel, { fontSize: rs(11) }]}>작성한 노트</Text>
             <View
-              style={[
-                modal.contentCard,
-                { borderRadius: rs(18), padding: rs(16), marginBottom: rs(18) },
-              ]}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 8,
+              }}
             >
-              <Text style={[modal.contentText, { fontSize: rs(14), lineHeight: rs(24) }]}>
-                {session.noteText?.trim() ? session.noteText : "작성된 노트가 없습니다."}
-              </Text>
+              <Text style={[modal.sectionLabel, { fontSize: rs(11) }]}>작성한 노트</Text>
+              {!isEditingNote && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setEditedNoteText(session.noteText ?? "");
+                    setIsEditingNote(true);
+                  }}
+                >
+                  <AppIcon name="create-outline" size={rs(15)} color={colors.primary} />
+                </TouchableOpacity>
+              )}
             </View>
 
-            <Text style={[modal.sectionLabel, { fontSize: rs(11) }]}>AI 요약</Text>
+            {isEditingNote ? (
+              <View
+                style={[
+                  modal.contentCard,
+                  { borderRadius: rs(18), padding: rs(16), marginBottom: rs(18) },
+                ]}
+              >
+                <TextInput
+                  multiline
+                  value={editedNoteText}
+                  onChangeText={setEditedNoteText}
+                  placeholder="노트를 입력하세요"
+                  placeholderTextColor={colors.textFaint}
+                  style={{
+                    fontSize: rs(14),
+                    lineHeight: rs(24),
+                    color: colors.text,
+                    minHeight: rs(100),
+                    textAlignVertical: "top",
+                  }}
+                />
+                <View style={{ flexDirection: "row", gap: rs(8), marginTop: rs(12) }}>
+                  <TouchableOpacity
+                    onPress={() => setIsEditingNote(false)}
+                    style={{
+                      flex: 1,
+                      backgroundColor: colors.surface,
+                      borderRadius: rs(12),
+                      paddingVertical: rs(11),
+                      alignItems: "center",
+                    }}
+                  >
+                    <Text style={{ color: colors.textMuted, fontWeight: "700", fontSize: rs(13) }}>
+                      취소
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleSaveNote}
+                    disabled={savingNote}
+                    style={{
+                      flex: 1,
+                      backgroundColor: colors.primary,
+                      borderRadius: rs(12),
+                      paddingVertical: rs(11),
+                      alignItems: "center",
+                      opacity: savingNote ? 0.6 : 1,
+                    }}
+                  >
+                    <Text style={{ color: colors.onPrimary, fontWeight: "700", fontSize: rs(13) }}>
+                      {savingNote ? "저장 중..." : "저장"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => {
+                  setEditedNoteText(session.noteText ?? "");
+                  setIsEditingNote(true);
+                }}
+                style={[
+                  modal.contentCard,
+                  { borderRadius: rs(18), padding: rs(16), marginBottom: rs(18) },
+                ]}
+              >
+                <Text style={[modal.contentText, { fontSize: rs(14), lineHeight: rs(24) }]}>
+                  {session.noteText?.trim() ? session.noteText : "작성된 노트가 없습니다."}
+                </Text>
+              </TouchableOpacity>
+            )}
             <View
-              style={[modal.contentCard, { borderRadius: rs(18), padding: rs(16) }]}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 8,
+              }}
             >
-              <Text style={[modal.contentText, { fontSize: rs(14), lineHeight: rs(24) }]}>
-                {session.aiSummary?.trim() ? session.aiSummary : "AI 요약이 없습니다."}
-              </Text>
+              <Text style={[modal.sectionLabel, { fontSize: rs(11) }]}>AI 요약</Text>
+              {!isEditingSummary && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setEditedSummaryText(session.aiSummary ?? "");
+                    setIsEditingSummary(true);
+                  }}
+                >
+                  <AppIcon name="create-outline" size={rs(15)} color={colors.primary} />
+                </TouchableOpacity>
+              )}
             </View>
+
+            {isEditingSummary ? (
+              <View
+                style={[modal.contentCard, { borderRadius: rs(18), padding: rs(16) }]}
+              >
+                <TextInput
+                  multiline
+                  value={editedSummaryText}
+                  onChangeText={setEditedSummaryText}
+                  placeholder="AI 요약을 입력하세요"
+                  placeholderTextColor={colors.textFaint}
+                  style={{
+                    fontSize: rs(14),
+                    lineHeight: rs(24),
+                    color: colors.text,
+                    minHeight: rs(100),
+                    textAlignVertical: "top",
+                  }}
+                />
+                <View style={{ flexDirection: "row", gap: rs(8), marginTop: rs(12) }}>
+                  <TouchableOpacity
+                    onPress={() => setIsEditingSummary(false)}
+                    style={{
+                      flex: 1,
+                      backgroundColor: colors.surface,
+                      borderRadius: rs(12),
+                      paddingVertical: rs(11),
+                      alignItems: "center",
+                    }}
+                  >
+                    <Text style={{ color: colors.textMuted, fontWeight: "700", fontSize: rs(13) }}>
+                      취소
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleSaveSummary}
+                    disabled={savingSummary}
+                    style={{
+                      flex: 1,
+                      backgroundColor: colors.primary,
+                      borderRadius: rs(12),
+                      paddingVertical: rs(11),
+                      alignItems: "center",
+                      opacity: savingSummary ? 0.6 : 1,
+                    }}
+                  >
+                    <Text style={{ color: colors.onPrimary, fontWeight: "700", fontSize: rs(13) }}>
+                      {savingSummary ? "저장 중..." : "저장"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => {
+                  setEditedSummaryText(session.aiSummary ?? "");
+                  setIsEditingSummary(true);
+                }}
+                style={[modal.contentCard, { borderRadius: rs(18), padding: rs(16) }]}
+              >
+                <Text style={[modal.contentText, { fontSize: rs(14), lineHeight: rs(24) }]}>
+                  {session.aiSummary?.trim() ? session.aiSummary : "AI 요약이 없습니다."}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {attempts.length > 0 && (
               <>
@@ -581,32 +867,6 @@ function DetailModal({
               </Text>
             </TouchableOpacity>
 
-            {!session.noteText?.trim() && (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={handleAddNote}
-                style={[
-                  modal.deleteBtn,
-                  {
-                    marginTop: rs(10),
-                    paddingVertical: rs(15),
-                    borderRadius: rs(16),
-                    backgroundColor: colors.primarySoft,
-                  },
-                ]}
-              >
-                <AppIcon name="create-outline" size={rs(18)} color={colors.primary} />
-                <Text
-                  style={[
-                    modal.deleteBtnText,
-                    { fontSize: rs(14), color: colors.primary },
-                  ]}
-                >
-                  노트 추가하기
-                </Text>
-              </TouchableOpacity>
-            )}
-
             <TouchableOpacity
               activeOpacity={0.85}
               onPress={() => setShowDeleteConfirm(true)}
@@ -620,7 +880,7 @@ function DetailModal({
             </TouchableOpacity>
           </ScrollView>
         </View>
-        {/* Quiz attempt review modal */}
+
         <Modal
           visible={!!reviewAttempt}
           transparent
@@ -859,7 +1119,6 @@ function DetailModal({
           </View>
         </Modal>
 
-        {/* Fullscreen photo viewer */}
         <Modal
           visible={photoFullscreen}
           transparent
@@ -886,46 +1145,38 @@ function DetailModal({
             </View>
           </TouchableWithoutFeedback>
         </Modal>
-      </Modal>
+        {showDeleteConfirm && (
+          <View style={modal.popBackdrop}>
+            <View style={modal.popCard}>
+              <View style={modal.popIconWrapper}>
+                <AppIcon name="trash-outline" size={24} color={colors.danger} />
+              </View>
+              <Text style={modal.popTitle}>세션 삭제</Text>
+              <Text style={modal.popDesc}>이 학습 기록을 삭제하시겠어요?</Text>
 
-      {/* Integrated Matching Design Popover Window */}
-      <Modal
-        visible={showDeleteConfirm}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setShowDeleteConfirm(false)}
-      >
-        <View style={modal.popBackdrop}>
-          <View style={modal.popCard}>
-            <View style={modal.popIconWrapper}>
-              <AppIcon name="trash-outline" size={24} color={colors.danger} />
-            </View>
-            <Text style={modal.popTitle}>세션 삭제</Text>
-            <Text style={modal.popDesc}>이 학습 기록을 삭제하시겠어요?</Text>
+              <View style={modal.popActionGrid}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  style={modal.popCancelBtn}
+                  onPress={() => setShowDeleteConfirm(false)}
+                >
+                  <Text style={modal.popCancelLabel}>취소</Text>
+                </TouchableOpacity>
 
-            <View style={modal.popActionGrid}>
-              <TouchableOpacity
-                activeOpacity={0.8}
-                style={modal.popCancelBtn}
-                onPress={() => setShowDeleteConfirm(false)}
-              >
-                <Text style={modal.popCancelLabel}>취소</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                activeOpacity={0.8}
-                style={modal.popConfirmBtn}
-                onPress={() => {
-                  setShowDeleteConfirm(false);
-                  onDelete(session.id);
-                }}
-              >
-                <Text style={modal.popConfirmLabel}>삭제</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  style={modal.popConfirmBtn}
+                  onPress={() => {
+                    setShowDeleteConfirm(false);
+                    onDelete(session.id);
+                  }}
+                >
+                  <Text style={modal.popConfirmLabel}>삭제</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
+        )}
       </Modal>
     </>
   );
@@ -944,7 +1195,6 @@ function SessionCard({
   rs: (n: number) => number;
   colors: ThemePalette;
 }) {
-
   const card = StyleSheet.create({
     row: { flexDirection: "row", alignItems: "center", gap: 12 },
     rowBorder: { borderBottomWidth: 1, borderBottomColor: colors.border },
@@ -971,15 +1221,7 @@ function SessionCard({
     metaText: { color: colors.textFaint },
     notePreview: { color: colors.textMuted, marginTop: 2, lineHeight: 18 },
     photoTag: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2 },
-    pendingTag: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
-      marginTop: 2,
-    },
   });
-
-  const needsNote = !session.noteText?.trim();
 
   return (
     <View>
@@ -1005,27 +1247,19 @@ function SessionCard({
             <Text style={[card.metaText, { fontSize: rs(12) }]}>
               {formatTime(session.startTime)}
             </Text>
-            {/* Little camera icon if this session has a photo */}
             {(!!session.photoUri || (session.photoUris && session.photoUris.length > 0)) && (
               <View style={card.photoTag}>
                 <AppIcon name="image-outline" size={rs(11)} color={colors.primary} />
               </View>
             )}
           </View>
-          {needsNote ? (
-            <View style={card.pendingTag}>
-              <AppIcon name="create-outline" size={rs(11)} color={colors.textFaint} />
-              <Text style={[card.metaText, { fontSize: rs(11) }]}>노트 미작성</Text>
-            </View>
-          ) : (
-            !!session.noteText?.trim() && (
-              <Text
-                style={[card.notePreview, { fontSize: rs(12) }]}
-                numberOfLines={2}
-              >
-                {session.noteText}
-              </Text>
-            )
+          {!!session.noteText?.trim() && (
+            <Text
+              style={[card.notePreview, { fontSize: rs(12) }]}
+              numberOfLines={2}
+            >
+              {session.noteText}
+            </Text>
           )}
         </View>
         <AppIcon name="chevron-forward" size={rs(14)} color={colors.border} />
@@ -1043,6 +1277,7 @@ export default function HistoryScreen() {
 
   const [sessions, setSessions] = useState<StudySession[]>([]);
   const [selected, setSelected] = useState<StudySession | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useFocusEffect(
     useCallback(() => {
@@ -1057,7 +1292,31 @@ export default function HistoryScreen() {
     setSelected(null);
   };
 
-  const groups = groupSessions(sessions);
+  function handleToggleVisibility(id: string, isPublic: boolean) {
+    setSessions((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, isPublic } : s))
+    );
+    setSelected((prev) => (prev && prev.id === id ? { ...prev, isPublic } : prev));
+  }
+
+  const handleNoteSaved = async () => {
+    const updated = await loadSessions();
+    setSessions(updated);
+    setSelected((prev) => {
+      if (!prev) return prev;
+      return updated.find((s) => s.id === prev.id) ?? prev;
+    });
+  };
+
+  const filteredSessions = sessions.filter((sess) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    const subjectMatch = sess.subject?.toLowerCase().includes(q);
+    const noteMatch = sess.noteText?.toLowerCase().includes(q);
+    return subjectMatch || noteMatch;
+  });
+
+  const groups = groupSessions(filteredSessions);
   const totalMs = sessions.reduce((sum, s) => sum + s.durationMs, 0);
 
   const s = StyleSheet.create({
@@ -1081,7 +1340,7 @@ export default function HistoryScreen() {
       flexDirection: "row",
       backgroundColor: colors.surface,
       borderRadius: rs(20),
-      marginBottom: rs(24),
+      marginBottom: rs(20),
       overflow: "hidden",
     },
     stripItem: {
@@ -1101,6 +1360,21 @@ export default function HistoryScreen() {
     stripValue: {
       fontSize: Math.min(rs(18), 24),
       fontWeight: "800",
+      color: colors.text,
+    },
+    searchWrapper: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: rs(8),
+      backgroundColor: colors.surface,
+      borderRadius: rs(16),
+      paddingHorizontal: rs(14),
+      paddingVertical: rs(12),
+      marginBottom: rs(20),
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: rs(13),
       color: colors.text,
     },
     groupLabel: {
@@ -1153,10 +1427,28 @@ export default function HistoryScreen() {
             </View>
           </View>
 
+          <View style={s.searchWrapper}>
+            <AppIcon name="search-outline" size={rs(16)} color={colors.textFaint} />
+            <TextInput
+              style={s.searchInput}
+              placeholder="과목 또는 노트 내용 검색"
+              placeholderTextColor={colors.textFaint}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery("")}>
+                <AppIcon name="close-circle" size={rs(16)} color={colors.textFaint} />
+              </TouchableOpacity>
+            )}
+          </View>
+
           {groups.length === 0 ? (
             <View style={s.emptyContainer}>
               <AppIcon name="calendar-outline" size={rs(32)} color={colors.textFaint} />
-              <Text style={s.emptyText}>아직 기록된 세션이 없습니다.</Text>
+              <Text style={s.emptyText}>
+                {searchQuery.trim() ? "검색 결과가 없습니다." : "아직 기록된 세션이 없습니다."}
+              </Text>
             </View>
           ) : (
             groups.map((group) => (
@@ -1184,6 +1476,8 @@ export default function HistoryScreen() {
         session={selected}
         onClose={() => setSelected(null)}
         onDelete={handleDelete}
+        onNoteSaved={handleNoteSaved}
+        onToggleVisibility={handleToggleVisibility}
         rs={rs}
         colors={colors}
       />
