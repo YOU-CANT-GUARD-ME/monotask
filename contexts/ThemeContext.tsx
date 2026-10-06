@@ -36,7 +36,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function resolveMode(
   mode: ThemeMode,
-  systemScheme: ColorSchemeName
+  systemScheme: ColorSchemeName | null | undefined
 ): ResolvedMode {
   if (mode === "system") return systemScheme === "dark" ? "dark" : "light";
   return mode;
@@ -45,7 +45,7 @@ function resolveMode(
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [themeKey, setThemeKeyState] = useState<ThemeKey>(DEFAULT_THEME_KEY);
   const [themeMode, setThemeModeState] = useState<ThemeMode>(DEFAULT_THEME_MODE);
-  const [systemScheme, setSystemScheme] = useState<ColorSchemeName>(
+  const [systemScheme, setSystemScheme] = useState<ColorSchemeName | null | undefined>(
     Appearance.getColorScheme()
   );
   const [loading, setLoading] = useState(true);

@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "focusapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
@@ -16,7 +15,6 @@
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#F4F1EA"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.youcantguardme.focusapp",
       "softwareKeyboardLayoutMode": "resize",
@@ -50,7 +48,13 @@
           }
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "expo-font",
+      "expo-image",
+      "expo-status-bar",
+      "expo-web-browser",
+      "expo-audio",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,

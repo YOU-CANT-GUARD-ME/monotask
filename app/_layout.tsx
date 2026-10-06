@@ -42,7 +42,7 @@ function GlobalSplashOverlay({ onDone }: { onDone: () => void }) {
     <Animated.View
       pointerEvents="auto"
       style={[
-        StyleSheet.absoluteFillObject,
+        StyleSheet.absoluteFill,
         { 
           opacity: overlayOpacity, 
           zIndex: 2147483647, 

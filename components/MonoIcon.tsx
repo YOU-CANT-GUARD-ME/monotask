@@ -1,4 +1,5 @@
 import React from "react";
+import { ColorValue } from "react-native";
 import Svg, { Circle, Line, Path, Polyline, Rect } from "react-native-svg";
 
 type IconName = "home" | "book" | "stats" | "user" | "lock" | "bellOff" | "people";
@@ -6,7 +7,7 @@ type IconName = "home" | "book" | "stats" | "user" | "lock" | "bellOff" | "peopl
 type Props = {
   name: IconName;
   size?: number;
-  color?: string;
+  color?: ColorValue;
 };
 
 export default function MonoIcon({ name, size = 24, color = "#26221A" }: Props) {

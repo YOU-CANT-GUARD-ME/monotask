@@ -1,6 +1,6 @@
 // app/focus.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Audio } from "expo-av";
+import { AudioPlayer, createAudioPlayer } from "expo-audio";
 import * as Notifications from "expo-notifications";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -366,7 +366,7 @@ export default function FocusScreen() {
   const hasFiredCompleteRef = useRef(false);
   const focusModeRef = useRef<FocusMode>("stopwatch");
   const targetDurationRef = useRef<number | null>(null);
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const soundRef = useRef<AudioPlayer | null>(null);
   const alertLoopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const alertActiveRef = useRef(false);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
@@ -382,11 +382,13 @@ export default function FocusScreen() {
       Vibration.vibrate([0, 300, 150, 300, 150, 300]);
 
       try {
-        const { sound } = await Audio.Sound.createAsync(
-          require("../assets/sound/timer-done.mp3")
-        );
-        soundRef.current = sound;
-        await sound.playAsync();
+        if (!soundRef.current) {
+          soundRef.current = createAudioPlayer(
+            require("../assets/sound/timer-done.wav")
+          );
+        }
+        await soundRef.current.seekTo(0);
+        soundRef.current.play();
       } catch (e) {
         console.warn("Faild to play timer sound:", e);
       }
@@ -410,8 +412,8 @@ export default function FocusScreen() {
     Vibration.cancel();
 
     if (soundRef.current) {
-      soundRef.current.stopAsync().catch(() => { });
-      soundRef.current.unloadAsync().catch(() => { });
+      soundRef.current.pause();
+      soundRef.current.remove();
       soundRef.current = null;
     }
   }
@@ -903,7 +905,7 @@ export default function FocusScreen() {
       letterSpacing: 0.3,
     },
     confirmOverlay: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       backgroundColor: "rgba(0,0,0,0.52)",
       alignItems: "center",
       justifyContent: "center",

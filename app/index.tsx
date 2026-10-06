@@ -137,7 +137,7 @@ function SplashOverlay({ onDone }: { onDone: () => void }) {
   return (
     <Animated.View
       pointerEvents="none"
-      style={[StyleSheet.absoluteFillObject, { opacity: overlayOpacity, zIndex: 99 }]}
+      style={[StyleSheet.absoluteFill, { opacity: overlayOpacity, zIndex: 99 }]}
     >
       <View style={splash.bg}>
         <View style={splash.glow} />
