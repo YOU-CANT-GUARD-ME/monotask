@@ -1,7 +1,7 @@
 // utils/leaderboard.ts
-import { collection, doc, getDocs, setDoc } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import { auth, db } from "../firebase";
-import { getSessions, Session } from "./storage";
+import { apiPost } from "./api";
 
 export type LeaderboardEntry = {
   uid: string;
@@ -11,65 +11,17 @@ export type LeaderboardEntry = {
   updatedAt: number;
 };
 
-function startOfDay(ts: number): number {
-  const d = new Date(ts);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
-function getWeekMonday(date: Date): Date {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = (day + 6) % 7;
-  d.setDate(d.getDate() - diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function computeStatsFromSessions(sessions: Session[]) {
-  const dailyMap = new Map<number, number>();
-  for (const s of sessions) {
-    const key = startOfDay(s.startTime);
-    dailyMap.set(key, (dailyMap.get(key) ?? 0) + s.durationMs);
-  }
-
-  const monday = getWeekMonday(new Date()).getTime();
-  let weeklyMs = 0;
-  for (const [dayTs, ms] of dailyMap.entries()) {
-    if (dayTs >= monday) weeklyMs += ms;
-  }
-
-  const todayTs = startOfDay(Date.now());
-  let streak = 0;
-  let check = todayTs;
-  while (dailyMap.has(check)) {
-    streak++;
-    check -= 86400000;
-  }
-
-  return { weeklyMs, streak };
-}
-
-// Recomputes this user's stats from local sessions and pushes them to
-// Firestore. Safe to call often — it's just a local calc + one write.
+// Asks the server to recompute this user's entry from their saved sessions.
+// The server does the maths so nobody can post made-up numbers.
 export async function syncMyLeaderboardEntry(): Promise<void> {
-  const user = auth.currentUser;
-  if (!user) return;
+  if (!auth.currentUser) return;
 
-  const sessions = await getSessions();
-  const { weeklyMs, streak } = computeStatsFromSessions(sessions);
-  const displayName = user.displayName ?? user.email?.split("@")[0] ?? "User";
-
-  await setDoc(doc(db, "leaderboard", user.uid), {
-    uid: user.uid,
-    displayName,
-    weeklyMs,
-    streak,
-    updatedAt: Date.now(),
+  await apiPost("/api/sync-leaderboard", {
+    tzOffsetMinutes: new Date().getTimezoneOffset(),
   });
 }
 
-// Fetches every leaderboard entry. Your rules allow any logged-in user to
+// Fetches every leaderboard entry. The rules allow any logged-in user to
 // read this whole collection, so global + friends + streak views can all
 // be derived client-side from one fetch.
 export async function getLeaderboard(): Promise<LeaderboardEntry[]> {

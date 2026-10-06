@@ -1,7 +1,4 @@
-import { Platform } from "react-native";
-
-const MONOTASK_API_BASE_URL =
-  Platform.OS === "web" ? "" : "https://monotask-lock-in.vercel.app";
+import { apiPost } from "./api";
 
 // utils/quiz.ts
 // Generates an OX quiz from study notes.
@@ -29,32 +26,13 @@ export async function generateQuiz(
   const timeout = setTimeout(() => controller.abort(), 30000);
 
   try {
-    const response = await fetch(`${MONOTASK_API_BASE_URL}/api/generate-quiz`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        noteText,
-        aiSummary,
-        subject,
-        difficulty,
-      }),
-    });
+    const data = await apiPost<{ questions?: QuizQuestion[] }>(
+      "/api/generate-quiz",
+      { noteText, aiSummary, subject, difficulty },
+      { signal: controller.signal }
+    );
 
     clearTimeout(timeout);
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      const message =
-        typeof data?.error === "string"
-          ? data.error
-          : JSON.stringify(data?.error || data);
-
-      throw new Error(`API Error ${response.status}: ${message}`);
-    }
 
     const questions: QuizQuestion[] = data.questions ?? [];
 

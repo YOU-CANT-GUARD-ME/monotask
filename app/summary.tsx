@@ -23,6 +23,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemePalette } from "../constants/themes";
 import { useTheme } from "../contexts/ThemeContext";
+import { apiPost } from "../utils/api";
 import { uploadPhotos } from "../utils/photo";
 import { deleteSession, getSessions, saveSession } from "../utils/storage";
 
@@ -77,9 +78,6 @@ function formatDate(iso: string): string {
   return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
 }
 
-const MONOTASK_API_BASE_URL =
-  Platform.OS === "web" ? "" : "https://monotask-lock-in.vercel.app";
-
 // ─── AI Summary with multiple photos ─────────────────────────────────────────
 
 async function imageContentFor(photoUri: string): Promise<any | null> {
@@ -96,9 +94,9 @@ async function imageContentFor(photoUri: string): Promise<any | null> {
     // This guarantees OpenAI accepts the format and also shrinks large photos.
     const manipulated = await ImageManipulator.manipulateAsync(
       photoUri,
-      [{ resize: { width: 1280 } }], // cap width so we don't blow up payload
+      [{ resize: { width: 1024 } }], // cap width so we don't blow up payload
       {
-        compress: 0.8,
+        compress: 0.6,
         format: ImageManipulator.SaveFormat.JPEG,
         base64: true,
       }
@@ -133,10 +131,23 @@ export async function fetchAiSummary(
   }
 
   // Build image content blocks (parallel)
+  // Vercel rejects request bodies over ~4.5MB, so stop adding photos once the
+  // encoded images reach this budget.
+  const MAX_IMAGE_BYTES = 3.5 * 1024 * 1024;
   const imageBlocks: any[] = [];
   if (hasPhotos) {
     const results = await Promise.all(photoUris.map((u) => imageContentFor(u)));
-    for (const r of results) if (r) imageBlocks.push(r);
+    let totalBytes = 0;
+    for (const r of results) {
+      if (!r) continue;
+      const size = r.image_url.url.length;
+      if (totalBytes + size > MAX_IMAGE_BYTES) {
+        console.warn("⚠️ skipping photo: request would be too large");
+        continue;
+      }
+      totalBytes += size;
+      imageBlocks.push(r);
+    }
   }
 
   console.log("📸 photos sent to AI:", imageBlocks.length, "/", photoUris.length);
@@ -148,26 +159,13 @@ export async function fetchAiSummary(
 
   try {
     // Calls our own Vercel API route so the OpenAI key stays on the server.
-    const response = await fetch(`${MONOTASK_API_BASE_URL}/api/generate-summary`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ noteText, imageBlocks }),
-    });
+    const data = await apiPost<{ summary?: string }>(
+      "/api/generate-summary",
+      { noteText, imageBlocks },
+      { signal: controller.signal }
+    );
 
     clearTimeout(timeout);
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      const message =
-        typeof data?.error === "string"
-          ? data.error
-          : JSON.stringify(data?.error || data);
-      throw new Error(`API Error ${response.status}: ${message}`);
-    }
 
     return data?.summary?.trim() || "요약을 생성할 수 없습니다.";
   } catch (error: any) {

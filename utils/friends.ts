@@ -1,17 +1,8 @@
 // utils/friends.ts
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  where,
-  setDoc,
-  deleteDoc,
-  limit,
-} from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../firebase";
+import { apiPost } from "./api";
 
 export type FriendStatus = "pending" | "accepted";
 
@@ -49,6 +40,9 @@ function requireUid(): Promise<string> {
   });
 }
 
+// Search, send, accept and remove all go through /api/friends: they write
+// to both users' friend lists, which only the server is allowed to do.
+
 // ─── Search for a user by exact email ──────────────────────────────────────
 export async function searchUserByEmail(
   email: string
@@ -56,82 +50,37 @@ export async function searchUserByEmail(
   const cleanEmail = email.trim().toLowerCase();
   if (!cleanEmail) return null;
 
-  const myUid = await requireUid();
-
-  const usersCol = collection(db, "users");
-  const q = query(usersCol, where("emailLower", "==", cleanEmail), limit(1));
-  const snap = await getDocs(q);
-
-  if (snap.empty) return null;
-
-  const docSnap = snap.docs[0];
-  if (docSnap.id === myUid) return null; // can't friend yourself
-
-  const data = docSnap.data();
-  return {
-    uid: docSnap.id,
-    email: data.email ?? "",
-    displayName: data.displayName ?? "User",
-  };
+  await requireUid();
+  const data = await apiPost<{ user: UserSearchResult | null }>("/api/friends", {
+    action: "search",
+    email: cleanEmail,
+  });
+  return data.user;
 }
 
 // ─── Send a friend request ─────────────────────────────────────────────────
+// Names and emails are looked up on the server; the extra arguments are kept
+// so existing callers don't need to change.
 export async function sendFriendRequest(
   targetUid: string,
-  targetDisplayName: string,
-  targetEmail: string
+  _targetDisplayName?: string,
+  _targetEmail?: string
 ): Promise<void> {
   const myUid = await requireUid();
   if (myUid === targetUid) return;
-
-  const myProfileSnap = await getDoc(doc(db, "users", myUid));
-  const myData = myProfileSnap.data();
-  const myDisplayName = myData?.displayName ?? "User";
-  const myEmail = myData?.email ?? "";
-
-  const now = Date.now();
-
-  await setDoc(doc(db, "users", myUid, "friends", targetUid), {
-    uid: targetUid,
-    status: "pending",
-    direction: "sent",
-    since: now,
-    displayName: targetDisplayName,
-    email: targetEmail,
-  });
-
-  await setDoc(doc(db, "users", targetUid, "friends", myUid), {
-    uid: myUid,
-    status: "pending",
-    direction: "received",
-    since: now,
-    displayName: myDisplayName,
-    email: myEmail,
-  });
+  await apiPost("/api/friends", { action: "send", uid: targetUid });
 }
 
 // ─── Accept a friend request ────────────────────────────────────────────────
 export async function acceptFriendRequest(otherUid: string): Promise<void> {
-  const myUid = await requireUid();
-
-  await setDoc(
-    doc(db, "users", myUid, "friends", otherUid),
-    { status: "accepted" },
-    { merge: true }
-  );
-  await setDoc(
-    doc(db, "users", otherUid, "friends", myUid),
-    { status: "accepted" },
-    { merge: true }
-  );
+  await requireUid();
+  await apiPost("/api/friends", { action: "accept", uid: otherUid });
 }
 
 // ─── Decline / remove a friend ─────────────────────────────────────────────
 export async function removeFriend(otherUid: string): Promise<void> {
-  const myUid = await requireUid();
-
-  await deleteDoc(doc(db, "users", myUid, "friends", otherUid));
-  await deleteDoc(doc(db, "users", otherUid, "friends", myUid));
+  await requireUid();
+  await apiPost("/api/friends", { action: "remove", uid: otherUid });
 }
 
 // ─── Get all friend docs for the current user ──────────────────────────────

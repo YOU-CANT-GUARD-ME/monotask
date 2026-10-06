@@ -374,7 +374,7 @@ function LoginModal({
       setPassword("");
       setMessage("비밀번호 재설정 이메일을 보냈습니다. 메일함을 확인해주세요.");
     } catch (e: any) {
-      setError(getErrorMsg(e.code));
+      setError(e?.code ? getErrorMsg(e.code) : e?.message || getErrorMsg(e?.code));
     } finally {
       setLoading(false);
     }

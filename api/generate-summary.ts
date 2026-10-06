@@ -2,6 +2,8 @@
 // Generates an AI study summary from notes and photos.
 // Runs on Vercel so the OpenAI key is read from the environment, not shipped in the app.
 
+import { rateLimit, requireUser, sendError } from "./_lib/admin";
+
 function isImageBlock(b: any) {
   return (
     b &&
@@ -18,6 +20,9 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const uid = await requireUser(req);
+    await rateLimit(`summary:${uid}`, 40, 24 * 60 * 60 * 1000);
+
     const apiKey = process.env.OPENAI_API_KEY;
 
     if (!apiKey) {
@@ -117,8 +122,6 @@ ${noteText.trim() ? `학생이 추가로 작성한 노트:\n"${noteText}"` : "�
 
     return res.status(200).json({ summary });
   } catch (error: any) {
-    return res.status(500).json({
-      error: error?.message || "Summary generation failed",
-    });
+    return sendError(res, error, "Summary generation failed");
   }
 }

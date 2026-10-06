@@ -1,0 +1,62 @@
+rules_version = '2';
+
+// Firestore security rules for Monotask.
+//
+// Anything that touches another user's data (friend requests, friend
+// profiles, leaderboard numbers, email search) goes through the Vercel API
+// routes, which use admin access and do their own checks. So clients only
+// ever need access to their OWN documents here.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    // A session must have sane numbers: 0–24h long, not starting in the future.
+    function validSession() {
+      let s = request.resource.data;
+      return s.durationMs is number
+        && s.durationMs >= 0
+        && s.durationMs <= 24 * 60 * 60 * 1000
+        && s.startTime is number
+        && s.startTime <= request.time.toMillis() + 5 * 60 * 1000;
+    }
+
+    match /users/{uid} {
+      allow read, create, update: if isOwner(uid);
+      allow delete: if false;
+
+      match /sessions/{sessionId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validSession();
+      }
+
+      match /quizAttempts/{attemptId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Written only by /api/friends so both sides always stay in sync.
+      match /friends/{otherUid} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+    }
+
+    // Written only by /api/sync-leaderboard, which computes the numbers.
+    match /leaderboard/{uid} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Everything else (including rateLimits) is server-only.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

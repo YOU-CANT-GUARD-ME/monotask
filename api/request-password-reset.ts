@@ -1,26 +1,5 @@
-import { cert, getApps, initializeApp } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
 import { Resend } from "resend";
-
-function getFirebaseAdminAuth() {
-  if (!getApps().length) {
-    const raw = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
-
-    if (!raw) {
-      throw new Error("FIREBASE_SERVICE_ACCOUNT_BASE64 is missing");
-    }
-
-    const serviceAccount = JSON.parse(
-      Buffer.from(raw, "base64").toString("utf8")
-    );
-
-    initializeApp({
-      credential: cert(serviceAccount),
-    });
-  }
-
-  return getAuth();
-}
+import { adminAuth, clientIp, rateLimit, sendError } from "./_lib/admin";
 
 function escapeHtml(value: string) {
   return value
@@ -53,16 +32,21 @@ export default async function handler(req: any, res: any) {
       return res.status(500).json({ error: "RESEND_API_KEY is missing" });
     }
 
-    const adminAuth = getFirebaseAdminAuth();
+    // Stop this route being used to flood an inbox or spam many addresses.
+    const hourMs = 60 * 60 * 1000;
+    await rateLimit(`reset-ip:${clientIp(req)}`, 10, hourMs);
+    await rateLimit(`reset-email:${cleanEmail}`, 3, hourMs);
+
+    const auth = adminAuth();
 
     // Do not reveal whether the account exists.
     try {
-      await adminAuth.getUserByEmail(cleanEmail);
+      await auth.getUserByEmail(cleanEmail);
     } catch {
       return res.status(200).json({ ok: true });
     }
 
-    const firebaseResetLink = await adminAuth.generatePasswordResetLink(cleanEmail);
+    const firebaseResetLink = await auth.generatePasswordResetLink(cleanEmail);
     const firebaseUrl = new URL(firebaseResetLink);
     const oobCode = firebaseUrl.searchParams.get("oobCode");
 
@@ -135,8 +119,6 @@ If you did not request this, you can ignore this email.`;
 
     return res.status(200).json({ ok: true });
   } catch (error: any) {
-    return res.status(500).json({
-      error: error?.message || "Password reset request failed",
-    });
+    return sendError(res, error, "Password reset request failed");
   }
 }

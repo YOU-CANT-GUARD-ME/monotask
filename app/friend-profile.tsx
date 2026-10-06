@@ -1,7 +1,6 @@
 // app/friend-profile.tsx
 import AppIcon from "../components/AppIcon";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -19,7 +18,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ThemePalette } from "../constants/themes";
 import { useTheme } from "../contexts/ThemeContext";
-import { db } from "../firebase";
+import { apiPost } from "../utils/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -303,29 +302,19 @@ export default function FriendProfileScreen() {
     setLoading(true);
     setError(null);
     try {
-      const profileSnap = await getDoc(doc(db, "users", uid));
-      const data = profileSnap.data();
-      const displayName = data?.displayName ?? "User";
-      const email = data?.email ?? "";
+      // The server checks you're friends and leaves out private notes.
+      const data = await apiPost<{
+        profile: { displayName: string; email: string };
+        sessions: FriendSession[];
+      }>("/api/friend-profile", { uid });
+      const { displayName, email } = data.profile;
       setProfile({
         displayName,
         email,
         avatarInitials: initialsOf(displayName),
       });
 
-      const sessionsSnap = await getDocs(collection(db, "users", uid, "sessions"));
-      const list: FriendSession[] = sessionsSnap.docs.map((d) => {
-        const s = d.data();
-        return {
-          id: d.id,
-          startTime: s.startTime,
-          durationMs: s.durationMs ?? 0,
-          subject: s.subject,
-          noteText: s.noteText,
-          aiSummary: s.aiSummary,
-          isPublic: s.isPublic === true,
-        };
-      });
+      const list: FriendSession[] = data.sessions;
       list.sort((a, b) => b.startTime - a.startTime);
       setSessions(list);
     } catch (e) {
@@ -363,8 +352,8 @@ export default function FriendProfileScreen() {
     return { totalMs, streak, todayMs, totalDays: dailyMap.size };
   }, [sessions]);
 
-  // Stats above are computed from ALL sessions regardless of visibility —
-  // only the notes list itself is restricted to sessions the person marked public.
+  // Stats above use the times of ALL sessions; the server only sends notes for
+  // sessions the person marked public.
   const notes = useMemo(
     () => sessions.filter((s) => s.noteText?.trim() && s.isPublic === true),
     [sessions]

@@ -1,3 +1,5 @@
+import { rateLimit, requireUser, sendError } from "./_lib/admin";
+
 type Difficulty = "easy" | "medium" | "hard";
 
 const NUM_QUESTIONS = 10;
@@ -69,6 +71,9 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const uid = await requireUser(req);
+    await rateLimit(`quiz:${uid}`, 40, 24 * 60 * 60 * 1000);
+
     const apiKey = process.env.OPENAI_API_KEY;
 
     if (!apiKey) {
@@ -154,8 +159,6 @@ export default async function handler(req: any, res: any) {
 
     return res.status(200).json({ questions: valid });
   } catch (error: any) {
-    return res.status(500).json({
-      error: error?.message || "Quiz generation failed",
-    });
+    return sendError(res, error, "Quiz generation failed");
   }
 }
