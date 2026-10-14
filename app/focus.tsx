@@ -16,10 +16,12 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 import { useTheme } from "../contexts/ThemeContext";
 import { saveSession } from "../utils/storage";
 import AppIcon from "@/components/AppIcon";
+import CameraPresence, { isCameraPresenceSupported } from "../components/CameraPresence";
 import {
   openDndAccessSettings,
   openOverlayPermissionSettings,
@@ -54,6 +56,9 @@ type ActiveFocusSession = {
   mode?: FocusMode;
   targetMs?: number;
   awayStartedAt?: number;
+  // Time spent paused because the camera couldn't see the user.
+  pausedMs?: number;
+  pausedAt?: number;
 };
 
 type FocusAwayNotice = {
@@ -100,12 +105,25 @@ function readActiveSession(raw: string | null): ActiveFocusSession | null {
           ? parsed.awayStartedAt
           : undefined;
 
+      const pausedMs =
+        typeof parsed?.pausedMs === "number" &&
+          Number.isFinite(parsed.pausedMs) &&
+          parsed.pausedMs > 0
+          ? parsed.pausedMs
+          : undefined;
+      const pausedAt =
+        typeof parsed?.pausedAt === "number" && Number.isFinite(parsed.pausedAt)
+          ? parsed.pausedAt
+          : undefined;
+
       return {
         sessionId: parsed.sessionId,
         startTime: parsed.startTime,
         mode,
         targetMs,
         awayStartedAt,
+        pausedMs,
+        pausedAt,
       };
     }
 
@@ -341,6 +359,7 @@ export default function FocusScreen() {
   const scale = safeWidth / 390;
   const rs = (n: number) => Math.max(1, Math.round(n * scale));
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const router = useRouter();
   const { sessionId, mode, targetMs } = useLocalSearchParams<{
@@ -359,6 +378,12 @@ export default function FocusScreen() {
   const [focusMode, setFocusMode] = useState<FocusMode>("stopwatch");
   const [targetDurationMs, setTargetDurationMs] = useState<number | null>(null);
   const [focusAwayNotice, setFocusAwayNotice] = useState<FocusAwayNotice | null>(null);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [cameraPaused, setCameraPaused] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  // Checked after mount: the web page is pre-rendered without a camera API,
+  // so showing the button on first render would mismatch the static HTML.
+  const [cameraSupported, setCameraSupported] = useState(false);
 
   const startTimeRef = useRef<number | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -372,6 +397,15 @@ export default function FocusScreen() {
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const awayStartedAtRef = useRef<number | null>(null);
   const awayNotificationIdRef = useRef<string | null>(null);
+  const pausedTotalMsRef = useRef(0);
+  const pausedAtRef = useRef<number | null>(null);
+
+  // Focus time so far, leaving out any time paused by the camera check.
+  function elapsedAt(now: number): number {
+    if (!startTimeRef.current) return 0;
+    const pausedNow = pausedAtRef.current ? Math.max(0, now - pausedAtRef.current) : 0;
+    return Math.max(0, now - startTimeRef.current - pausedTotalMsRef.current - pausedNow);
+  }
 
   async function playCompletionAlert() {
     alertActiveRef.current = true;
@@ -420,8 +454,7 @@ export default function FocusScreen() {
 
   function syncElapsedFromClock() {
     if (!startTimeRef.current) return;
-    const now = Date.now();
-    const nextElapsed = Math.max(0, now - startTimeRef.current);
+    const nextElapsed = elapsedAt(Date.now());
     setElapsedMs(nextElapsed);
 
     // Timer mode: once the countdown hits zero, show completion alert
@@ -465,6 +498,8 @@ export default function FocusScreen() {
         focusModeRef.current === "timer"
           ? targetDurationRef.current ?? undefined
           : undefined,
+      pausedMs: pausedTotalMsRef.current || undefined,
+      pausedAt: pausedAtRef.current ?? undefined,
     };
 
     if (leftAt !== null) {
@@ -550,6 +585,44 @@ export default function FocusScreen() {
     }
   }
 
+  function pauseForCamera() {
+    if (hasEndedRef.current || pausedAtRef.current) return;
+    pausedAtRef.current = Date.now();
+    setCameraPaused(true);
+    syncElapsedFromClock();
+    persistActiveSessionAway(awayStartedAtRef.current).catch(() => { });
+  }
+
+  function resumeFromCamera() {
+    if (!pausedAtRef.current) return;
+    pausedTotalMsRef.current += Math.max(0, Date.now() - pausedAtRef.current);
+    pausedAtRef.current = null;
+    setCameraPaused(false);
+    syncElapsedFromClock();
+    persistActiveSessionAway(awayStartedAtRef.current).catch(() => { });
+  }
+
+  function handlePresenceChange(present: boolean) {
+    if (present) resumeFromCamera();
+    else pauseForCamera();
+  }
+
+  function toggleCamera() {
+    setCameraError(null);
+    if (cameraOn) {
+      setCameraOn(false);
+      resumeFromCamera();
+    } else {
+      setCameraOn(true);
+    }
+  }
+
+  function handleCameraError(message: string) {
+    setCameraError(message);
+    setCameraOn(false);
+    resumeFromCamera();
+  }
+
   useEffect(() => {
     let mounted = true;
 
@@ -605,14 +678,25 @@ export default function FocusScreen() {
 
       if (!mounted) return;
 
+      // Restore paused time. A pause that was still running when the app
+      // closed counts as paused up to now (the camera is off after a reload).
+      const restoringSaved = savedIsValid && saved!.sessionId === nextSessionId;
+      const restoredPausedMs = restoringSaved
+        ? (saved!.pausedMs ?? 0) +
+          (saved!.pausedAt ? Math.max(0, now - saved!.pausedAt) : 0)
+        : 0;
+
       setRestoredSessionId(!sessionId && savedIsValid ? saved!.sessionId : null);
       startTimeRef.current = nextStartTime;
+      pausedTotalMsRef.current = restoredPausedMs;
+      pausedAtRef.current = null;
+      setCameraPaused(false);
       focusModeRef.current = nextMode;
       targetDurationRef.current = nextMode === "timer" ? nextTargetMs ?? null : null;
 
       setFocusMode(nextMode);
       setTargetDurationMs(targetDurationRef.current);
-      setElapsedMs(Math.max(0, Date.now() - nextStartTime));
+      setElapsedMs(elapsedAt(Date.now()));
       setShowTimerComplete(false);
       setFocusAwayNotice(null);
       awayStartedAtRef.current = null;
@@ -624,6 +708,7 @@ export default function FocusScreen() {
           startTime: nextStartTime,
           mode: nextMode,
           targetMs: nextMode === "timer" ? nextTargetMs : undefined,
+          pausedMs: restoredPausedMs || undefined,
         })
       );
 
@@ -640,7 +725,7 @@ export default function FocusScreen() {
       // If we restored a session that already blew past its target while
       // the app was closed, show the completion alert immediately instead
       // of starting the ticker.
-      const restoredElapsed = Math.max(0, Date.now() - nextStartTime);
+      const restoredElapsed = elapsedAt(Date.now());
       if (
         nextMode === "timer" &&
         targetDurationRef.current &&
@@ -673,6 +758,10 @@ export default function FocusScreen() {
       stopCompletionAlert();
     };
   }, [sessionId]);
+
+  useEffect(() => {
+    setCameraSupported(isCameraPresenceSupported);
+  }, []);
 
   useEffect(() => {
     prepareFocusNotifications().catch((error) => {
@@ -744,13 +833,14 @@ export default function FocusScreen() {
     setShowEndConfirm(false);
     setFocusAwayNotice(null);
     awayStartedAtRef.current = null;
+    setCameraOn(false);
 
     const capturedStartTime = startTimeRef.current ?? Date.now();
     const capturedEndTime = endTimeOverride ?? Date.now();
 
     stopTicker();
 
-    const durationMs = Math.max(0, capturedEndTime - capturedStartTime);
+    const durationMs = elapsedAt(capturedEndTime);
 
     cancelFocusAwayNotification().catch(() => { });
     if (Platform.OS === "android") {
@@ -810,8 +900,7 @@ export default function FocusScreen() {
     setShowTimerComplete(false);
     hasFiredCompleteRef.current = false;
 
-    const now = Date.now();
-    const currentElapsed = startTimeRef.current ? now - startTimeRef.current : 0;
+    const currentElapsed = elapsedAt(Date.now());
     const newTarget = currentElapsed + extraMs;
     targetDurationRef.current = newTarget;
     setTargetDurationMs(newTarget);
@@ -823,6 +912,8 @@ export default function FocusScreen() {
         startTime: startTimeRef.current,
         mode: focusModeRef.current,
         targetMs: newTarget,
+        pausedMs: pausedTotalMsRef.current || undefined,
+        pausedAt: pausedAtRef.current ?? undefined,
       })
     ).catch(() => { });
 
@@ -897,6 +988,76 @@ export default function FocusScreen() {
       shadowOpacity: 0.35,
       shadowRadius: 12,
       elevation: 8,
+    },
+    cameraToggle: {
+      width: "100%",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: rs(8),
+      paddingVertical: rs(14),
+      borderRadius: rs(18),
+      marginBottom: rs(12),
+      borderWidth: 1,
+      borderColor: "rgba(135,152,106,0.35)",
+    },
+    cameraToggleText: {
+      fontSize: rs(14),
+      fontWeight: "700",
+      color: "#e0d8c4",
+    },
+    cameraError: {
+      fontSize: rs(12),
+      lineHeight: rs(18),
+      color: "#E8A39D",
+      textAlign: "center",
+      marginBottom: rs(12),
+    },
+    // Camera mode: camera fills the top 70%, time + buttons the bottom 30%.
+    containerCamera: {
+      padding: 0,
+      alignItems: "stretch",
+      justifyContent: "flex-start",
+    },
+    cameraArea: {
+      flex: 7,
+    },
+    cameraPausedOverlay: {
+      ...StyleSheet.absoluteFill,
+      backgroundColor: "rgba(0,0,0,0.45)",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: rs(24),
+    },
+    cameraPausedTitle: {
+      fontSize: rs(20),
+      fontWeight: "800",
+      color: "#fff",
+      marginBottom: rs(6),
+    },
+    cameraPausedBody: {
+      fontSize: rs(14),
+      color: "rgba(255,255,255,0.85)",
+      textAlign: "center",
+    },
+    cameraBottom: {
+      flex: 3,
+      paddingHorizontal: rs(24),
+      paddingTop: rs(12),
+      justifyContent: "center",
+    },
+    cameraElapsed: {
+      fontSize: Math.min(rs(40), 48),
+      fontWeight: "600",
+      color: "#e0d8c4",
+      textAlign: "center",
+    },
+    cameraElapsedLabel: {
+      fontSize: rs(12),
+      color: colors.primaryDark,
+      textAlign: "center",
+      marginTop: rs(2),
+      marginBottom: rs(14),
     },
     endText: {
       fontSize: rs(16),
@@ -1001,61 +1162,118 @@ export default function FocusScreen() {
   });
 
   return (
-    <View style={s.container}>
-      <View style={s.dot} />
-      <Text style={s.modeLabel}>{isTimer ? "Timer" : "Focus mode"}</Text>
+    <View style={[s.container, cameraOn && s.containerCamera]}>
+      {cameraOn ? (
+        <>
+          <View style={s.cameraArea}>
+            <CameraPresence
+              accentColor={colors.primary}
+              onPresenceChange={handlePresenceChange}
+              onError={handleCameraError}
+            />
+            {cameraPaused && (
+              <View style={s.cameraPausedOverlay} pointerEvents="none">
+                <Text style={s.cameraPausedTitle}>타이머 일시정지</Text>
+                <Text style={s.cameraPausedBody}>
+                  화면 밖에 있어 타이머를 멈췄어요.{"\n"}돌아오면 다시 시작돼요.
+                </Text>
+              </View>
+            )}
+          </View>
 
-      <View style={s.svgWrapper}>
-        <Svg width={circleSize} height={circleSize}>
-          <Circle
-            stroke="#2B3123"
-            fill="none"
-            cx={circleSize / 2}
-            cy={circleSize / 2}
-            r={radius}
-            strokeWidth={strokeWidth}
-          />
-          <Circle
-            stroke={colors.heat?.[2] ?? colors.primary}
-            fill="none"
-            cx={circleSize / 2}
-            cy={circleSize / 2}
-            r={radius}
-            strokeWidth={strokeWidth + 7}
-            strokeDasharray={circumference}
-            strokeDashoffset={strokeDashoffset}
-            strokeLinecap="round"
-            rotation="-90"
-            origin={`${circleSize / 2}, ${circleSize / 2}`}
-            opacity={0.22}
-          />
-          <Circle
-            stroke={colors.primary}
-            fill="none"
-            cx={circleSize / 2}
-            cy={circleSize / 2}
-            r={radius}
-            strokeWidth={strokeWidth}
-            strokeDasharray={circumference}
-            strokeDashoffset={strokeDashoffset}
-            strokeLinecap="round"
-            rotation="-90"
-            origin={`${circleSize / 2}, ${circleSize / 2}`}
-          />
-        </Svg>
+          <View style={[s.cameraBottom, { paddingBottom: insets.bottom + rs(16) }]}>
+            <Text style={s.cameraElapsed}>{formatElapsed(displayMs)}</Text>
+            <Text style={s.cameraElapsedLabel}>
+              {cameraPaused ? "일시정지됨" : isTimer ? "남은 시간" : "집중 시간"}
+            </Text>
+            <TouchableOpacity
+              style={[s.cameraToggle, { paddingVertical: rs(12) }]}
+              onPress={toggleCamera}
+              activeOpacity={0.85}
+            >
+              <AppIcon name="camera" size={rs(18)} color="#e0d8c4" />
+              <Text style={s.cameraToggleText}>카메라 집중 모드 끄기</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.endButton, { paddingVertical: rs(14) }]}
+              onPress={handleEnd}
+              activeOpacity={0.85}
+            >
+              <Text style={s.endText}>집중 세션 종료</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      ) : (
+        <>
+          <View style={s.dot} />
+          <Text style={s.modeLabel}>{isTimer ? "Timer" : "Focus mode"}</Text>
 
-        <View style={s.timerOverlay}>
-          <Text style={s.elapsed}>{formatElapsed(displayMs)}</Text>
-          <Text style={s.elapsedLabel}>{isTimer ? "남은 시간" : "집중 시간"}</Text>
-        </View>
-      </View>
+          <View style={s.svgWrapper}>
+            <Svg width={circleSize} height={circleSize}>
+              <Circle
+                stroke="#2B3123"
+                fill="none"
+                cx={circleSize / 2}
+                cy={circleSize / 2}
+                r={radius}
+                strokeWidth={strokeWidth}
+              />
+              <Circle
+                stroke={colors.heat?.[2] ?? colors.primary}
+                fill="none"
+                cx={circleSize / 2}
+                cy={circleSize / 2}
+                r={radius}
+                strokeWidth={strokeWidth + 7}
+                strokeDasharray={circumference}
+                strokeDashoffset={strokeDashoffset}
+                strokeLinecap="round"
+                rotation="-90"
+                origin={`${circleSize / 2}, ${circleSize / 2}`}
+                opacity={0.22}
+              />
+              <Circle
+                stroke={colors.primary}
+                fill="none"
+                cx={circleSize / 2}
+                cy={circleSize / 2}
+                r={radius}
+                strokeWidth={strokeWidth}
+                strokeDasharray={circumference}
+                strokeDashoffset={strokeDashoffset}
+                strokeLinecap="round"
+                rotation="-90"
+                origin={`${circleSize / 2}, ${circleSize / 2}`}
+              />
+            </Svg>
 
-      <View style={s.bottomArea}>
-        <DndNudge rs={rs} />
-        <TouchableOpacity style={s.endButton} onPress={handleEnd} activeOpacity={0.85}>
-          <Text style={s.endText}>집중 세션 종료</Text>
-        </TouchableOpacity>
-      </View>
+            <View style={s.timerOverlay}>
+              <Text style={s.elapsed}>{formatElapsed(displayMs)}</Text>
+              <Text style={s.elapsedLabel}>{isTimer ? "남은 시간" : "집중 시간"}</Text>
+            </View>
+          </View>
+
+          <View style={s.bottomArea}>
+            <DndNudge rs={rs} />
+            {cameraSupported && (
+              <>
+                {!!cameraError && <Text style={s.cameraError}>{cameraError}</Text>}
+                <TouchableOpacity
+                  style={s.cameraToggle}
+                  onPress={toggleCamera}
+                  activeOpacity={0.85}
+                >
+                  <AppIcon name="camera" size={rs(18)} color="#e0d8c4" />
+                  <Text style={s.cameraToggleText}>카메라 집중 모드 켜기</Text>
+                </TouchableOpacity>
+              </>
+            )}
+            <TouchableOpacity style={s.endButton} onPress={handleEnd} activeOpacity={0.85}>
+              <Text style={s.endText}>집중 세션 종료</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
 
       {showEndConfirm && (
         <View style={s.confirmOverlay}>

@@ -131,6 +131,15 @@ export default function AppIcon({ name, size = 24, color = "#26221A", style }: P
     );
   }
 
+  if (["camera", "videocam"].includes(n)) {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
+        <Rect x="3.5" y="7" width="12" height="10" rx="2.5" stroke={color} strokeWidth={2.2} />
+        <Path d="M15.5 10.5L20.5 7.8V16.2L15.5 13.5" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+      </Svg>
+    );
+  }
+
   if (["trash"].includes(n)) {
     return (
       <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
