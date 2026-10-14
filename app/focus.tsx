@@ -2,8 +2,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AudioPlayer, createAudioPlayer } from "expo-audio";
 import * as Notifications from "expo-notifications";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   AppState,
   AppStateStatus,
@@ -765,14 +765,14 @@ export default function FocusScreen() {
   }, []);
 
   // Web: match the status-bar strip to this screen's dark background (black
-  // behind the camera) instead of the theme's light page colour.
-  useEffect(() => {
-    setWebChromeOverrideColor("focus", cameraOn ? "#000000" : colors.surfaceDark);
-  }, [cameraOn, colors.surfaceDark]);
-
-  useEffect(() => {
-    return () => setWebChromeOverrideColor("focus", null);
-  }, []);
+  // behind the camera) while it's on screen. Tab screens stay mounted after
+  // you leave them, so this follows focus/blur rather than mount/unmount.
+  useFocusEffect(
+    useCallback(() => {
+      setWebChromeOverrideColor("focus", cameraOn ? "#000000" : colors.surfaceDark);
+      return () => setWebChromeOverrideColor("focus", null);
+    }, [cameraOn, colors.surfaceDark])
+  );
 
   useEffect(() => {
     prepareFocusNotifications().catch((error) => {
