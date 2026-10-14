@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 import { useTheme } from "../contexts/ThemeContext";
 import { saveSession } from "../utils/storage";
+import { setWebChromeOverrideColor } from "../utils/webChrome";
 import AppIcon from "@/components/AppIcon";
 import CameraPresence, { isCameraPresenceSupported } from "../components/CameraPresence";
 import {
@@ -761,6 +762,16 @@ export default function FocusScreen() {
 
   useEffect(() => {
     setCameraSupported(isCameraPresenceSupported);
+  }, []);
+
+  // Web: match the status-bar strip to this screen's dark background (black
+  // behind the camera) instead of the theme's light page colour.
+  useEffect(() => {
+    setWebChromeOverrideColor("focus", cameraOn ? "#000000" : colors.surfaceDark);
+  }, [cameraOn, colors.surfaceDark]);
+
+  useEffect(() => {
+    return () => setWebChromeOverrideColor("focus", null);
   }, []);
 
   useEffect(() => {

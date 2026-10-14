@@ -20,6 +20,7 @@ import {
     THEMES,
 } from "../constants/themes";
 import { auth, db } from "../firebase";
+import { setWebChromeBaseColor } from "../utils/webChrome";
 
 type ThemeContextValue = {
   themeKey: ThemeKey;
@@ -126,6 +127,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const resolvedMode = resolveMode(themeMode, systemScheme);
   const theme = THEMES[themeKey];
   const colors = resolvedMode === "dark" ? theme.dark : theme.light;
+
+  // Web: colour the strip behind the status bar to match the screen.
+  useEffect(() => {
+    setWebChromeBaseColor(colors.bg);
+  }, [colors.bg]);
 
   const value: ThemeContextValue = {
     themeKey,

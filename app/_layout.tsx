@@ -6,6 +6,7 @@ import { Animated, Easing, Platform, StyleSheet, View } from "react-native";
 import MonoIcon from "../components/MonoIcon";
 import ResumeFocusSession from "../components/ResumeFocusSession";
 import { ThemeProvider, useTheme } from "../contexts/ThemeContext";
+import { setWebChromeOverrideColor } from "../utils/webChrome";
 import { watchAuthAndSyncProfile } from "../utils/userProfile";
 
 const TAB_BAR_BASE_HEIGHT = 80;
@@ -111,7 +112,7 @@ function ThemedTabs() {
 }
 
 function ThemedRoot() {
-  const { colors, resolvedMode, loading } = useTheme();
+  const { colors, resolvedMode } = useTheme();
   const [showSplash, setShowSplash] = useState(!hasShownGlobalSplash);
 
   useEffect(() => {
@@ -119,42 +120,17 @@ function ThemedRoot() {
     return unsub;
   }, []);
 
+  // Web: keep the strip behind the status bar dark while the splash covers
+  // the page. The theme's own colour is set in ThemeContext.
   useEffect(() => {
-    if (Platform.OS === "web") {
-      // Always set splash color immediately, no loading check needed
-      if (showSplash) {
-        document.body.style.backgroundColor = colors.surfaceDark;
-        document.querySelector('meta[name="theme-color"]')?.setAttribute("content", colors.surfaceDark);
-      }
-    }
+    if (showSplash) setWebChromeOverrideColor("splash", colors.surfaceDark);
   }, [showSplash, colors.surfaceDark]);
-  
-  const [themeLoaded, setThemeLoaded] = useState(false);
-
-  useEffect(() => {
-    if (!loading && !themeLoaded) {
-      setThemeLoaded(true);
-    }
-  }, [loading]);
-  
-  useEffect(() => {
-    if (Platform.OS === "web") {
-      if (!themeLoaded) return;
-      if (showSplash) return;
-      document.body.style.backgroundColor = colors.bg;
-      document.querySelector('meta[name="theme-color"]')?.setAttribute("content", colors.bg);
-    }
-  }, [colors.bg, themeLoaded, showSplash]);
 
   function handleSplashDone() {
     hasShownGlobalSplash = true;
     setShowSplash(false);
-    if (Platform.OS === "web") {
-      setTimeout(() => {
-        document.body.style.backgroundColor = colors.bg;
-        document.querySelector('meta[name="theme-color"]')?.setAttribute("content", colors.bg);
-      }, 600);
-    }
+    // Switch back once the splash has faded out.
+    setTimeout(() => setWebChromeOverrideColor("splash", null), 600);
   }
 
   return (
