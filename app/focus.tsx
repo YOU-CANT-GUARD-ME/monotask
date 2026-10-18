@@ -60,6 +60,8 @@ type ActiveFocusSession = {
   // Time spent paused because the camera couldn't see the user.
   pausedMs?: number;
   pausedAt?: number;
+  // Whether camera focus mode was turned on in the start sheet.
+  cameraMode?: boolean;
 };
 
 type FocusAwayNotice = {
@@ -125,6 +127,7 @@ function readActiveSession(raw: string | null): ActiveFocusSession | null {
         awayStartedAt,
         pausedMs,
         pausedAt,
+        cameraMode: parsed?.cameraMode === true,
       };
     }
 
@@ -363,10 +366,11 @@ export default function FocusScreen() {
   const insets = useSafeAreaInsets();
 
   const router = useRouter();
-  const { sessionId, mode, targetMs } = useLocalSearchParams<{
+  const { sessionId, mode, targetMs, camera } = useLocalSearchParams<{
     sessionId?: string;
     mode?: string;
     targetMs?: string;
+    camera?: string;
   }>();
 
   const fallbackSessionId = useRef(Date.now().toString()).current;
@@ -382,9 +386,7 @@ export default function FocusScreen() {
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraPaused, setCameraPaused] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  // Checked after mount: the web page is pre-rendered without a camera API,
-  // so showing the button on first render would mismatch the static HTML.
-  const [cameraSupported, setCameraSupported] = useState(false);
+  const cameraOnRef = useRef(false);
 
   const startTimeRef = useRef<number | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -501,6 +503,7 @@ export default function FocusScreen() {
           : undefined,
       pausedMs: pausedTotalMsRef.current || undefined,
       pausedAt: pausedAtRef.current ?? undefined,
+      cameraMode: cameraOnRef.current || undefined,
     };
 
     if (leftAt !== null) {
@@ -608,20 +611,12 @@ export default function FocusScreen() {
     else pauseForCamera();
   }
 
-  function toggleCamera() {
-    setCameraError(null);
-    if (cameraOn) {
-      setCameraOn(false);
-      resumeFromCamera();
-    } else {
-      setCameraOn(true);
-    }
-  }
-
   function handleCameraError(message: string) {
     setCameraError(message);
     setCameraOn(false);
+    cameraOnRef.current = false;
     resumeFromCamera();
+    persistActiveSessionAway(awayStartedAtRef.current).catch(() => { });
   }
 
   useEffect(() => {
@@ -687,11 +682,22 @@ export default function FocusScreen() {
           (saved!.pausedAt ? Math.max(0, now - saved!.pausedAt) : 0)
         : 0;
 
+      // Camera mode comes from the start sheet for a new session, or from the
+      // saved session when it's being resumed.
+      const nextCameraMode =
+        isCameraPresenceSupported &&
+        (camera !== undefined
+          ? camera === "1"
+          : restoringSaved && saved!.cameraMode === true);
+
       setRestoredSessionId(!sessionId && savedIsValid ? saved!.sessionId : null);
       startTimeRef.current = nextStartTime;
       pausedTotalMsRef.current = restoredPausedMs;
       pausedAtRef.current = null;
       setCameraPaused(false);
+      setCameraError(null);
+      cameraOnRef.current = nextCameraMode;
+      setCameraOn(nextCameraMode);
       focusModeRef.current = nextMode;
       targetDurationRef.current = nextMode === "timer" ? nextTargetMs ?? null : null;
 
@@ -710,6 +716,7 @@ export default function FocusScreen() {
           mode: nextMode,
           targetMs: nextMode === "timer" ? nextTargetMs : undefined,
           pausedMs: restoredPausedMs || undefined,
+          cameraMode: nextCameraMode || undefined,
         })
       );
 
@@ -761,8 +768,8 @@ export default function FocusScreen() {
   }, [sessionId]);
 
   useEffect(() => {
-    setCameraSupported(isCameraPresenceSupported);
-  }, []);
+    cameraOnRef.current = cameraOn;
+  }, [cameraOn]);
 
   // Web: match the status-bar strip to this screen's dark background (black
   // behind the camera) while it's on screen. Tab screens stay mounted after
@@ -925,6 +932,7 @@ export default function FocusScreen() {
         targetMs: newTarget,
         pausedMs: pausedTotalMsRef.current || undefined,
         pausedAt: pausedAtRef.current ?? undefined,
+        cameraMode: cameraOnRef.current || undefined,
       })
     ).catch(() => { });
 
@@ -999,23 +1007,6 @@ export default function FocusScreen() {
       shadowOpacity: 0.35,
       shadowRadius: 12,
       elevation: 8,
-    },
-    cameraToggle: {
-      width: "100%",
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: rs(8),
-      paddingVertical: rs(14),
-      borderRadius: rs(18),
-      marginBottom: rs(12),
-      borderWidth: 1,
-      borderColor: "rgba(135,152,106,0.35)",
-    },
-    cameraToggleText: {
-      fontSize: rs(14),
-      fontWeight: "700",
-      color: "#e0d8c4",
     },
     cameraError: {
       fontSize: rs(12),
@@ -1198,14 +1189,6 @@ export default function FocusScreen() {
               {cameraPaused ? "일시정지됨" : isTimer ? "남은 시간" : "집중 시간"}
             </Text>
             <TouchableOpacity
-              style={[s.cameraToggle, { paddingVertical: rs(12) }]}
-              onPress={toggleCamera}
-              activeOpacity={0.85}
-            >
-              <AppIcon name="camera" size={rs(18)} color="#e0d8c4" />
-              <Text style={s.cameraToggleText}>카메라 집중 모드 끄기</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
               style={[s.endButton, { paddingVertical: rs(14) }]}
               onPress={handleEnd}
               activeOpacity={0.85}
@@ -1266,19 +1249,7 @@ export default function FocusScreen() {
 
           <View style={s.bottomArea}>
             <DndNudge rs={rs} />
-            {cameraSupported && (
-              <>
-                {!!cameraError && <Text style={s.cameraError}>{cameraError}</Text>}
-                <TouchableOpacity
-                  style={s.cameraToggle}
-                  onPress={toggleCamera}
-                  activeOpacity={0.85}
-                >
-                  <AppIcon name="camera" size={rs(18)} color="#e0d8c4" />
-                  <Text style={s.cameraToggleText}>카메라 집중 모드 켜기</Text>
-                </TouchableOpacity>
-              </>
-            )}
+            {!!cameraError && <Text style={s.cameraError}>{cameraError}</Text>}
             <TouchableOpacity style={s.endButton} onPress={handleEnd} activeOpacity={0.85}>
               <Text style={s.endText}>집중 세션 종료</Text>
             </TouchableOpacity>

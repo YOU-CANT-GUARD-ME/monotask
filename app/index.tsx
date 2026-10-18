@@ -11,6 +11,7 @@ import {
   Modal,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   TouchableWithoutFeedback,
@@ -24,6 +25,7 @@ import { useStudyStats } from "../hooks/useStudyStats";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
 import LoginRequiredModal from "../components/LoginRequiredModal";
+import { isCameraPresenceSupported } from "../components/CameraPresence";
 
 const ACTIVE_FOCUS_SESSION_KEY = "monotask_active_focus_session_v1";
 let hasShownSplash = false;
@@ -230,11 +232,13 @@ function StartSessionModal({
 }: {
   visible: boolean;
   onClose: () => void;
-  onConfirm: (mode: SessionMode, totalMs: number) => void;
+  onConfirm: (mode: SessionMode, totalMs: number, cameraMode: boolean) => void;
   rs: (n: number) => number;
   colors: any;
 }) {
   const [mode, setMode] = useState<SessionMode>("stopwatch");
+  // Kept between openings so the choice sticks for the next session.
+  const [cameraMode, setCameraMode] = useState(false);
   const [hours, setHours] = useState(0);
   const [minutes, setMinutes] = useState(0);
   const [seconds, setSeconds] = useState(0);
@@ -272,6 +276,20 @@ function StartSessionModal({
     },
     title: { fontSize: rs(20), fontWeight: "800", color: colors.text, marginBottom: rs(4) },
     sub: { fontSize: rs(13), color: colors.textFaint, marginBottom: rs(20) },
+    cameraRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      backgroundColor: colors.surface,
+      borderRadius: rs(14),
+      paddingVertical: rs(10),
+      paddingLeft: rs(16),
+      paddingRight: rs(12),
+      marginBottom: rs(12),
+    },
+    cameraLabelWrap: { flexDirection: "row", alignItems: "center", gap: rs(8), flexShrink: 1 },
+    cameraLabel: { fontSize: rs(14), fontWeight: "700", color: colors.text },
+    cameraHint: { fontSize: rs(11), color: colors.textFaint, marginTop: rs(2) },
     modeRow: {
       flexDirection: "row",
       backgroundColor: colors.surface,
@@ -310,6 +328,26 @@ function StartSessionModal({
           <View style={s.handle} />
           <Text style={s.title}>집중 세션 시작</Text>
           <Text style={s.sub}>스톱워치 또는 타이머 중에서 선택하세요</Text>
+
+          {isCameraPresenceSupported && (
+            <View style={s.cameraRow}>
+              <View style={s.cameraLabelWrap}>
+                <AppIcon name="camera" size={rs(18)} color={colors.text} />
+                <View style={{ flexShrink: 1 }}>
+                  <Text style={s.cameraLabel}>카메라 집중 모드</Text>
+                  <Text style={s.cameraHint}>화면 밖으로 나가면 타이머가 멈춰요</Text>
+                </View>
+              </View>
+              <Switch
+                value={cameraMode}
+                onValueChange={setCameraMode}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor="#ffffff"
+                ios_backgroundColor={colors.border}
+                accessibilityLabel="카메라 집중 모드"
+              />
+            </View>
+          )}
 
           <View style={s.modeRow}>
             <ModeButton
@@ -355,7 +393,7 @@ function StartSessionModal({
           <TouchableOpacity
             style={[s.startBtn, !canStart && s.startBtnDisabled]}
             disabled={!canStart}
-            onPress={() => onConfirm(mode, totalMs)}
+            onPress={() => onConfirm(mode, totalMs, cameraMode && isCameraPresenceSupported)}
             activeOpacity={0.85}
           >
             <Text style={s.startBtnText}>시작하기</Text>
@@ -410,7 +448,7 @@ export default function HomeScreen() {
     setShowLoginRequired(true);
   }
 
-function handleConfirmStart(mode: SessionMode, totalMs: number) {
+function handleConfirmStart(mode: SessionMode, totalMs: number, cameraMode: boolean) {
   setShowStartModal(false);
   AsyncStorage.removeItem(ACTIVE_FOCUS_SESSION_KEY).finally(() => {
     router.push({
@@ -418,6 +456,7 @@ function handleConfirmStart(mode: SessionMode, totalMs: number) {
       params: {
         sessionId: Date.now().toString(),
         mode,
+        camera: cameraMode ? "1" : "0",
         ...(mode === "timer" ? { targetMs: String(totalMs) } : {}),
       },
     });
