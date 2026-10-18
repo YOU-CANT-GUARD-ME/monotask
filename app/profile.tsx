@@ -146,7 +146,12 @@ function Sheet({
           style={{
             flex: 1,
             justifyContent: "flex-end",
-            backgroundColor: "rgba(0,0,0,0.4)",
+            // 40% of the theme's dark colour rather than plain black. On web,
+            // iPhone Safari colours the status-bar strip from what touches the
+            // top of the screen (this backdrop while a sheet is open), so it
+            // has to change with the theme or the strip won't update until
+            // the sheet closes.
+            backgroundColor: `${colors.surfaceDark}66`,
           }}
         >
           <TouchableWithoutFeedback onPress={onClose}>
