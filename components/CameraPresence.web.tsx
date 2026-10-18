@@ -25,6 +25,8 @@ const ABSENT_AFTER_MS = 3000;
 // Consecutive hits needed before we report "back", to ignore one-frame blips.
 const PRESENT_AFTER_HITS = 2;
 const MIN_FACE_SCORE = 0.5;
+// Give up (and say so) after this many failed checks in a row (~5 seconds).
+const MAX_FAILED_CHECKS = 20;
 
 type Status = "loading" | "present" | "absent";
 
@@ -96,16 +98,35 @@ export default function CameraPresence({
         let reportedPresent = true;
         let lastSeenAt = Date.now();
         let hits = 0;
+        let failedChecks = 0;
         setStatus("present");
 
         timer = setInterval(() => {
-          if (!detector || video.readyState < 2) return;
+          if (!detector) return;
+
+          // Phones can pause the camera video (e.g. Low Power Mode on iPhone),
+          // which freezes the picture so a returning face is never seen.
+          if (video.paused) video.play().catch(() => {});
+          if (video.readyState < 2) return;
 
           const now = Date.now();
-          const result = detector.detectForVideo(video, performance.now());
-          const seen = (result?.detections ?? []).some(
-            (d) => (d.categories?.[0]?.score ?? 0) >= MIN_FACE_SCORE
-          );
+          let seen: boolean;
+          try {
+            const result = detector.detectForVideo(video, performance.now());
+            seen = (result?.detections ?? []).some(
+              (d) => (d.categories?.[0]?.score ?? 0) >= MIN_FACE_SCORE
+            );
+            failedChecks = 0;
+          } catch (error) {
+            console.warn("Face check failed:", error);
+            if (++failedChecks >= MAX_FAILED_CHECKS) {
+              if (timer) clearInterval(timer);
+              onErrorRef.current(
+                "카메라 감지에 문제가 생겨 카메라 집중 모드를 껐어요. 타이머는 계속 진행돼요."
+              );
+            }
+            return;
+          }
 
           if (seen) {
             lastSeenAt = now;

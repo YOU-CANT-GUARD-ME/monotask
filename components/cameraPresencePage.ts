@@ -28,6 +28,8 @@ export const CAMERA_PRESENCE_HTML = `<!doctype html>
     const ABSENT_AFTER_MS = 3000;
     const PRESENT_AFTER_HITS = 2;
     const MIN_FACE_SCORE = 0.5;
+    // Give up (and say so) after this many failed checks in a row (~5 seconds).
+    const MAX_FAILED_CHECKS = 20;
 
     function post(message) {
       if (window.ReactNativeWebView) {
@@ -56,15 +58,28 @@ export const CAMERA_PRESENCE_HTML = `<!doctype html>
         let reportedPresent = true;
         let lastSeenAt = Date.now();
         let hits = 0;
+        let failedChecks = 0;
         post({ type: "ready" });
 
-        setInterval(() => {
+        const timer = setInterval(() => {
+          // Phones can pause the camera video, which freezes the picture.
+          if (video.paused) video.play().catch(() => {});
           if (video.readyState < 2) return;
           const now = Date.now();
-          const result = detector.detectForVideo(video, performance.now());
-          const seen = (result?.detections ?? []).some(
-            (d) => (d.categories?.[0]?.score ?? 0) >= MIN_FACE_SCORE
-          );
+          let seen;
+          try {
+            const result = detector.detectForVideo(video, performance.now());
+            seen = (result?.detections ?? []).some(
+              (d) => (d.categories?.[0]?.score ?? 0) >= MIN_FACE_SCORE
+            );
+            failedChecks = 0;
+          } catch (error) {
+            if (++failedChecks >= MAX_FAILED_CHECKS) {
+              clearInterval(timer);
+              post({ type: "error", reason: "failed", detail: String(error?.message || error) });
+            }
+            return;
+          }
 
           if (seen) {
             lastSeenAt = now;
