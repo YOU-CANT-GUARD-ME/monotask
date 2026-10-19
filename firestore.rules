@@ -2,10 +2,10 @@ rules_version = '2';
 
 // Firestore security rules for Monotask.
 //
-// Anything that touches another user's data (friend requests, friend
-// profiles, leaderboard numbers, email search) goes through the Vercel API
-// routes, which use admin access and do their own checks. So clients only
-// ever need access to their OWN documents here.
+// Anything that touches another user's data (follows, profiles, crews,
+// leaderboard numbers, email search) goes through the Vercel API routes,
+// which use admin access and do their own checks. Clients only need their
+// OWN documents here, plus the live crew room (participants and signals).
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -41,10 +41,43 @@ service cloud.firestore {
         allow read, write: if isOwner(uid);
       }
 
-      // Written only by /api/friends so both sides always stay in sync.
+      // Old friends system (read-only; replaced by following/followers).
       match /friends/{otherUid} {
         allow read: if isOwner(uid);
         allow write: if false;
+      }
+
+      // following/followers and crews links are read and written only by
+      // /api/follow and /api/crews, so they fall through to the deny rule.
+    }
+
+    // Crews are managed by /api/crews. Members can see who is in the crew's
+    // live group-study room and exchange WebRTC connection messages there.
+    match /crews/{crewId} {
+      function isMember() {
+        return signedIn()
+          && exists(/databases/$(database)/documents/crews/$(crewId)/members/$(request.auth.uid));
+      }
+
+      match /participants/{participantUid} {
+        allow read: if isMember();
+        // Joining goes through the API (4-person limit); you may only refresh
+        // your own heartbeat or leave.
+        allow update: if isOwner(participantUid) && isMember()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen'])
+          && request.resource.data.lastSeen is number;
+        allow delete: if isOwner(participantUid);
+        allow create: if false;
+      }
+
+      match /signals/{signalId} {
+        allow create: if isMember()
+          && request.resource.data.from == request.auth.uid
+          && request.resource.data.to is string
+          && request.resource.data.payload is string
+          && request.resource.data.payload.size() < 20000;
+        allow read, delete: if signedIn()
+          && (resource.data.to == request.auth.uid || resource.data.from == request.auth.uid);
       }
     }
 
