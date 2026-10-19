@@ -25,7 +25,7 @@ import Svg, { Circle, Line, Polyline } from "react-native-svg";
 import { ThemePalette } from "../constants/themes";
 import { useTheme } from "../contexts/ThemeContext";
 import { auth } from "../firebase";
-import { getMyFriends } from "../utils/friends";
+import { getFollowList } from "../utils/follow";
 import {
   getLeaderboard,
   LeaderboardEntry,
@@ -330,21 +330,16 @@ export default function StatsScreen() {
     }).start();
 
     // Best-effort: push my latest stats, then pull the full leaderboard +
-    // my friends list. None of this blocks the main stats UI above.
+    // the people I follow. None of this blocks the main stats UI above.
     syncMyLeaderboardEntry().catch((e) =>
       console.warn("leaderboard sync failed:", e)
     );
     getLeaderboard()
       .then(setLeaderboard)
       .catch((e) => console.warn("leaderboard fetch failed:", e));
-    getMyFriends()
-      .then((friends) => {
-        const uids = new Set(
-          friends.filter((f) => f.status === "accepted").map((f) => f.uid)
-        );
-        setFriendUids(uids);
-      })
-      .catch((e) => console.warn("friends fetch failed:", e));
+    getFollowList("following")
+      .then((following) => setFriendUids(new Set(following.map((f) => f.uid))))
+      .catch((e) => console.warn("following fetch failed:", e));
   }, []);
 
   useFocusEffect(
@@ -460,7 +455,7 @@ const lbValueFor = (e: LeaderboardEntry) =>
     : formatLeaderboardTime(e.weeklyMs);
 
   const lbModeLabel = (mode: LbMode) =>
-    mode === "friends" ? "친구" : mode === "streak" ? "연속 기록" : "전체 · 이번 주";
+    mode === "friends" ? "팔로잉" : mode === "streak" ? "연속 기록" : "전체 · 이번 주";
 
   const s = StyleSheet.create({
     safe: { flex: 1, backgroundColor: colors.bg },
@@ -846,7 +841,7 @@ const lbValueFor = (e: LeaderboardEntry) =>
           {activeList.length === 0 ? (
             <Text style={s.lbEmpty}>
               {lbMode === "friends"
-                ? "친구를 추가하면 순위가 표시돼요"
+                ? "팔로우한 사람이 생기면 순위가 표시돼요"
                 : "아직 데이터가 없어요"}
             </Text>
           ) : (
@@ -1173,7 +1168,7 @@ const lbValueFor = (e: LeaderboardEntry) =>
             {(
               [
                 { key: "global", label: "전체 · 이번 주" },
-                { key: "friends", label: "친구" },
+                { key: "friends", label: "팔로잉" },
                 { key: "streak", label: "연속 기록" },
               ] as { key: LbMode; label: string }[]
             ).map((tab) => {
@@ -1207,7 +1202,7 @@ const lbValueFor = (e: LeaderboardEntry) =>
                 }}
               >
                 {lbMode === "friends"
-                  ? "친구를 추가하면 순위가 표시돼요"
+                  ? "팔로우한 사람이 생기면 순위가 표시돼요"
                   : "아직 데이터가 없어요"}
               </Text>
             ) : (

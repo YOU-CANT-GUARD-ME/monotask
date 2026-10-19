@@ -1,7 +1,9 @@
 // app/friends.tsx
+// Community tab: find people by email, see who you follow and who follows
+// you, and (in the 크루 tab) your study crews.
 import AppIcon from "../components/AppIcon";
-import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Platform,
@@ -14,16 +16,18 @@ import {
     View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import CrewsPanel from "../components/CrewsPanel";
 import { useTheme } from "../contexts/ThemeContext";
 import {
-    acceptFriendRequest,
-    FriendDoc,
-    getMyFriends,
-    removeFriend,
+    FollowUser,
+    followUser,
+    getFollowList,
     searchUserByEmail,
-    sendFriendRequest,
+    unfollowUser,
     UserSearchResult,
-} from "../utils/friends";
+} from "../utils/follow";
+
+type Tab = "following" | "followers" | "crews";
 
 export default function FriendsScreen() {
     const { width } = useWindowDimensions();
@@ -32,31 +36,45 @@ export default function FriendsScreen() {
     const router = useRouter();
     const { colors } = useTheme();
 
+    const params = useLocalSearchParams<{ tab?: string }>();
+    const [tab, setTab] = useState<Tab>("following");
+
+    // Opened from the follower/following counts on the profile page.
+    useEffect(() => {
+        if (params.tab === "followers" || params.tab === "following" || params.tab === "crews") {
+            setTab(params.tab);
+        }
+    }, [params.tab]);
+
     const [searchEmail, setSearchEmail] = useState("");
     const [searching, setSearching] = useState(false);
     const [searchResult, setSearchResult] = useState<UserSearchResult | null | "not_found">(null);
-    const [sendingRequest, setSendingRequest] = useState(false);
 
-    const [friends, setFriends] = useState<FriendDoc[]>([]);
-    const [loadingFriends, setLoadingFriends] = useState(true);
+    const [following, setFollowing] = useState<FollowUser[]>([]);
+    const [followers, setFollowers] = useState<FollowUser[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [busyUid, setBusyUid] = useState<string | null>(null);
 
-    const loadFriends = useCallback(async () => {
-        setLoadingFriends(true);
+    const loadLists = useCallback(async () => {
+        setLoading(true);
         try {
-            const list = await getMyFriends();
-            setFriends(list);
+            const [ing, ers] = await Promise.all([
+                getFollowList("following"),
+                getFollowList("followers"),
+            ]);
+            setFollowing(ing);
+            setFollowers(ers);
         } catch (e) {
-            console.warn("loadFriends failed:", e);
-            setFriends([]);
+            console.warn("load follow lists failed:", e);
         } finally {
-            setLoadingFriends(false);
+            setLoading(false);
         }
     }, []);
 
     useFocusEffect(
         useCallback(() => {
-            loadFriends();
-        }, [loadFriends])
+            loadLists();
+        }, [loadLists])
     );
 
     const handleSearch = async () => {
@@ -74,37 +92,37 @@ export default function FriendsScreen() {
         }
     };
 
-    const handleSendRequest = async (user: UserSearchResult) => {
-        setSendingRequest(true);
+    // Follow or unfollow, updating every place that person appears.
+    const toggleFollow = async (user: FollowUser) => {
+        if (busyUid) return;
+        setBusyUid(user.uid);
+        const nowFollowing = !user.isFollowing;
+        const patch = (list: FollowUser[]) =>
+            list.map((u) => (u.uid === user.uid ? { ...u, isFollowing: nowFollowing } : u));
         try {
-            await sendFriendRequest(user.uid, user.displayName, user.email);
-            setSearchResult(null);
-            setSearchEmail("");
-            await loadFriends();
+            if (nowFollowing) await followUser(user.uid);
+            else await unfollowUser(user.uid);
+
+            setFollowers(patch);
+            setFollowing((list) =>
+                nowFollowing
+                    ? list.some((u) => u.uid === user.uid)
+                        ? patch(list)
+                        : [{ ...user, isFollowing: true }, ...list]
+                    : list.filter((u) => u.uid !== user.uid)
+            );
+            setSearchResult((r) =>
+                r && r !== "not_found" && r.uid === user.uid ? { ...r, isFollowing: nowFollowing } : r
+            );
         } catch (e) {
-            console.warn("send request failed:", e);
+            console.warn("follow toggle failed:", e);
         } finally {
-            setSendingRequest(false);
+            setBusyUid(null);
         }
     };
 
-    const handleAccept = async (uid: string) => {
-        await acceptFriendRequest(uid);
-        await loadFriends();
-    };
-
-    const handleRemove = async (uid: string) => {
-        await removeFriend(uid);
-        await loadFriends();
-    };
-
-    const pendingReceived = friends.filter(
-        (f) => f.status === "pending" && f.direction === "received"
-    );
-    const pendingSent = friends.filter(
-        (f) => f.status === "pending" && f.direction === "sent"
-    );
-    const accepted = friends.filter((f) => f.status === "accepted");
+    const openProfile = (uid: string) =>
+        router.push({ pathname: "/friend-profile", params: { uid } });
 
     const s = StyleSheet.create({
         safe: { flex: 1, backgroundColor: colors.bg },
@@ -138,50 +156,29 @@ export default function FriendsScreen() {
             justifyContent: "center",
         },
         searchBtnText: { color: colors.onPrimary, fontWeight: "700", fontSize: rs(13) },
-        resultCard: {
-            backgroundColor: colors.surface,
-            borderRadius: rs(16),
-            padding: rs(16),
-            marginBottom: rs(20),
-            flexDirection: "row",
-            alignItems: "center",
-            gap: rs(12),
-        },
-        resultAvatar: {
-            width: rs(40),
-            height: rs(40),
-            borderRadius: rs(20),
-            backgroundColor: colors.primary,
-            alignItems: "center",
-            justifyContent: "center",
-        },
-        resultAvatarText: { color: colors.onPrimary, fontWeight: "800", fontSize: rs(15) },
-        resultInfo: { flex: 1 },
-        resultName: { fontSize: rs(14), fontWeight: "700", color: colors.text },
-        resultEmail: { fontSize: rs(12), color: colors.textFaint, marginTop: rs(2) },
-        addBtn: {
-            backgroundColor: colors.primary,
-            borderRadius: rs(12),
-            paddingVertical: rs(10),
-            paddingHorizontal: rs(16),
-        },
-        addBtnText: { color: colors.onPrimary, fontWeight: "700", fontSize: rs(12) },
         notFoundText: {
             fontSize: rs(13),
             color: colors.textFaint,
             textAlign: "center",
             marginBottom: rs(20),
         },
-        sectionLabel: {
-            fontSize: rs(11),
-            color: colors.textFaint,
-            fontWeight: "700",
-            textTransform: "uppercase",
-            letterSpacing: 0.6,
-            marginBottom: rs(10),
-            marginTop: rs(4),
+        tabRow: {
+            flexDirection: "row",
+            backgroundColor: colors.surface,
+            borderRadius: rs(14),
+            padding: rs(4),
+            marginBottom: rs(16),
         },
-        friendCard: {
+        tabBtn: {
+            flex: 1,
+            alignItems: "center",
+            paddingVertical: rs(10),
+            borderRadius: rs(11),
+        },
+        tabBtnActive: { backgroundColor: colors.bg },
+        tabText: { fontSize: rs(13), fontWeight: "700", color: colors.textFaint },
+        tabTextActive: { color: colors.text },
+        card: {
             backgroundColor: colors.surface,
             borderRadius: rs(16),
             padding: rs(14),
@@ -190,7 +187,7 @@ export default function FriendsScreen() {
             alignItems: "center",
             gap: rs(12),
         },
-        friendAvatar: {
+        avatar: {
             width: rs(36),
             height: rs(36),
             borderRadius: rs(18),
@@ -198,25 +195,21 @@ export default function FriendsScreen() {
             alignItems: "center",
             justifyContent: "center",
         },
-        friendAvatarText: { color: colors.primary, fontWeight: "800", fontSize: rs(13) },
-        friendInfo: { flex: 1 },
-        friendName: { fontSize: rs(13), fontWeight: "700", color: colors.text },
-        friendEmail: { fontSize: rs(11), color: colors.textFaint, marginTop: rs(1) },
-        acceptBtn: {
+        avatarText: { color: colors.primary, fontWeight: "800", fontSize: rs(13) },
+        info: { flex: 1 },
+        name: { fontSize: rs(13), fontWeight: "700", color: colors.text },
+        sub: { fontSize: rs(11), color: colors.textFaint, marginTop: rs(1) },
+        followBtn: {
             backgroundColor: colors.primary,
             borderRadius: rs(10),
             paddingVertical: rs(8),
-            paddingHorizontal: rs(12),
+            paddingHorizontal: rs(14),
+            minWidth: rs(72),
+            alignItems: "center",
         },
-        acceptBtnText: { color: colors.onPrimary, fontWeight: "700", fontSize: rs(11) },
-        declineBtn: {
-            backgroundColor: colors.surfaceAlt,
-            borderRadius: rs(10),
-            paddingVertical: rs(8),
-            paddingHorizontal: rs(12),
-            marginLeft: rs(6),
-        },
-        declineBtnText: { color: colors.danger, fontWeight: "700", fontSize: rs(11) },
+        followBtnText: { color: colors.onPrimary, fontWeight: "700", fontSize: rs(12) },
+        followingBtn: { backgroundColor: colors.surfaceAlt },
+        followingBtnText: { color: colors.text },
         emptyText: {
             fontSize: rs(13),
             color: colors.textFaint,
@@ -228,12 +221,45 @@ export default function FriendsScreen() {
     const initials = (name: string) =>
         name.split(" ").map((p) => p[0]).join("").toUpperCase().slice(0, 2);
 
+    const FollowButton = ({ user }: { user: FollowUser }) =>
+        user.isMe ? null : (
+            <TouchableOpacity
+                style={[s.followBtn, user.isFollowing && s.followingBtn]}
+                onPress={() => toggleFollow(user)}
+                disabled={busyUid === user.uid}
+                activeOpacity={0.8}
+            >
+                {busyUid === user.uid ? (
+                    <ActivityIndicator size="small" color={user.isFollowing ? colors.text : colors.onPrimary} />
+                ) : (
+                    <Text style={[s.followBtnText, user.isFollowing && s.followingBtnText]}>
+                        {user.isFollowing ? "팔로잉" : "팔로우"}
+                    </Text>
+                )}
+            </TouchableOpacity>
+        );
+
+    const UserRow = ({ user, subtitle }: { user: FollowUser; subtitle?: string }) => (
+        <TouchableOpacity style={s.card} onPress={() => openProfile(user.uid)} activeOpacity={0.75}>
+            <View style={s.avatar}>
+                <Text style={s.avatarText}>{initials(user.displayName)}</Text>
+            </View>
+            <View style={s.info}>
+                <Text style={s.name}>{user.displayName}</Text>
+                {!!subtitle && <Text style={s.sub}>{subtitle}</Text>}
+            </View>
+            <FollowButton user={user} />
+        </TouchableOpacity>
+    );
+
+    const list = tab === "following" ? following : followers;
+
     return (
         <SafeAreaView style={s.safe} edges={Platform.OS === "web" ? [] : ["top"]}>
             <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
                 <View style={s.headerRow}>
-                    <Text style={s.headerTitle}>친구</Text>
-                    <Text style={s.headerSub}>이메일로 친구를 찾아보세요</Text>
+                    <Text style={s.headerTitle}>커뮤니티</Text>
+                    <Text style={s.headerSub}>이메일로 사람을 찾아 팔로우해보세요</Text>
                 </View>
 
                 <View style={s.searchRow}>
@@ -261,102 +287,40 @@ export default function FriendsScreen() {
                 )}
 
                 {searchResult && searchResult !== "not_found" && (
-                    <View style={s.resultCard}>
-                        <View style={s.resultAvatar}>
-                            <Text style={s.resultAvatarText}>{initials(searchResult.displayName)}</Text>
-                        </View>
-                        <View style={s.resultInfo}>
-                            <Text style={s.resultName}>{searchResult.displayName}</Text>
-                            <Text style={s.resultEmail}>{searchResult.email}</Text>
-                        </View>
-                        <TouchableOpacity
-                            style={s.addBtn}
-                            onPress={() => handleSendRequest(searchResult)}
-                            disabled={sendingRequest}
-                        >
-                            <Text style={s.addBtnText}>
-                                {sendingRequest ? "..." : "친구 요청"}
-                            </Text>
-                        </TouchableOpacity>
+                    <View style={{ marginBottom: rs(10) }}>
+                        <UserRow user={searchResult} subtitle={searchResult.email} />
                     </View>
                 )}
 
-                {loadingFriends ? (
+                <View style={s.tabRow}>
+                    {(
+                        [
+                            { key: "following", label: `팔로잉 ${following.length}` },
+                            { key: "followers", label: `팔로워 ${followers.length}` },
+                            { key: "crews", label: "크루" },
+                        ] as { key: Tab; label: string }[]
+                    ).map((t) => (
+                        <TouchableOpacity
+                            key={t.key}
+                            style={[s.tabBtn, tab === t.key && s.tabBtnActive]}
+                            onPress={() => setTab(t.key)}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={[s.tabText, tab === t.key && s.tabTextActive]}>{t.label}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+
+                {tab === "crews" ? (
+                    <CrewsPanel rs={rs} colors={colors} />
+                ) : loading ? (
                     <ActivityIndicator color={colors.primary} style={{ marginTop: rs(20) }} />
+                ) : list.length === 0 ? (
+                    <Text style={s.emptyText}>
+                        {tab === "following" ? "아직 팔로우한 사람이 없어요" : "아직 팔로워가 없어요"}
+                    </Text>
                 ) : (
-                    <>
-                        {pendingReceived.length > 0 && (
-                            <>
-                                <Text style={s.sectionLabel}>받은 요청</Text>
-                                {pendingReceived.map((f) => (
-                                    <View key={f.uid} style={s.friendCard}>
-                                        <View style={s.friendAvatar}>
-                                            <Text style={s.friendAvatarText}>
-                                                {initials(f.displayName ?? "User")}
-                                            </Text>
-                                        </View>
-                                        <View style={s.friendInfo}>
-                                            <Text style={s.friendName}>{f.displayName}</Text>
-                                            <Text style={s.friendEmail}>{f.email}</Text>
-                                        </View>
-                                        <TouchableOpacity style={s.acceptBtn} onPress={() => handleAccept(f.uid)}>
-                                            <Text style={s.acceptBtnText}>수락</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity style={s.declineBtn} onPress={() => handleRemove(f.uid)}>
-                                            <Text style={s.declineBtnText}>거절</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                ))}
-                            </>
-                        )}
-
-                        {pendingSent.length > 0 && (
-                            <>
-                                <Text style={s.sectionLabel}>보낸 요청</Text>
-                                {pendingSent.map((f) => (
-                                    <View key={f.uid} style={s.friendCard}>
-                                        <View style={s.friendAvatar}>
-                                            <Text style={s.friendAvatarText}>
-                                                {initials(f.displayName ?? "User")}
-                                            </Text>
-                                        </View>
-                                        <View style={s.friendInfo}>
-                                            <Text style={s.friendName}>{f.displayName}</Text>
-                                            <Text style={s.friendEmail}>대기 중...</Text>
-                                        </View>
-                                        <TouchableOpacity style={s.declineBtn} onPress={() => handleRemove(f.uid)}>
-                                            <Text style={s.declineBtnText}>취소</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                ))}
-                            </>
-                        )}
-
-                        <Text style={s.sectionLabel}>내 친구 ({accepted.length})</Text>
-                        {accepted.length === 0 ? (
-                            <Text style={s.emptyText}>아직 친구가 없어요</Text>
-                        ) : (
-                            accepted.map((f) => (
-                                <TouchableOpacity
-                                    key={f.uid}
-                                    style={s.friendCard}
-                                    onPress={() => router.push({ pathname: "/friend-profile", params: { uid: f.uid } })}
-                                    activeOpacity={0.75}
-                                >
-                                    <View style={s.friendAvatar}>
-                                        <Text style={s.friendAvatarText}>
-                                            {initials(f.displayName ?? "User")}
-                                        </Text>
-                                    </View>
-                                    <View style={s.friendInfo}>
-                                        <Text style={s.friendName}>{f.displayName}</Text>
-                                        <Text style={s.friendEmail}>{f.email}</Text>
-                                    </View>
-                                    <AppIcon name="chevron-forward" size={rs(14)} color={colors.border} />
-                                </TouchableOpacity>
-                            ))
-                        )}
-                    </>
+                    list.map((u) => <UserRow key={u.uid} user={u} />)
                 )}
             </ScrollView>
         </SafeAreaView>

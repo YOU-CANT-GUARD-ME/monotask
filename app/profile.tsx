@@ -44,6 +44,7 @@ import {
   THEMES
 } from "../constants/themes";
 import { useTheme } from "../contexts/ThemeContext";
+import { apiPost } from "../utils/api";
 import { auth } from "../firebase";
 import { getSessions, Session } from "../utils/storage";
 
@@ -1188,6 +1189,7 @@ export default function ProfileScreen() {
   const [user, setUser] = useState<User | null>(null);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [followCounts, setFollowCounts] = useState<{ followers: number; following: number } | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -1202,6 +1204,17 @@ export default function ProfileScreen() {
   };
 
   const load = useCallback(async () => {
+    const me = auth.currentUser;
+    if (me) {
+      apiPost<{ profile: { followersCount: number; followingCount: number } }>(
+        "/api/user-profile",
+        { uid: me.uid }
+      )
+        .then(({ profile }) =>
+          setFollowCounts({ followers: profile.followersCount, following: profile.followingCount })
+        )
+        .catch((e) => console.warn("follow counts failed:", e));
+    }
     const data = await getSessions();
     setSessions(data);
     Animated.timing(fadeAnim, {
@@ -1281,6 +1294,10 @@ export default function ProfileScreen() {
       marginBottom: rs(4),
     },
     userEmail: { fontSize: rs(13), color: colors.textFaint },
+    countsRow: { flexDirection: "row", gap: rs(28), marginTop: rs(14) },
+    countItem: { alignItems: "center" },
+    countValue: { fontSize: rs(17), fontWeight: "800", color: colors.text },
+    countLabel: { fontSize: rs(12), color: colors.textFaint, marginTop: rs(2) },
     statsRow: {
       flexDirection: "row",
       gap: rs(10),
@@ -1339,6 +1356,26 @@ export default function ProfileScreen() {
             </View>
             <Text style={s.userName}>{user.name}</Text>
             <Text style={s.userEmail}>{user.email}</Text>
+            {followCounts && (
+              <View style={s.countsRow}>
+                <TouchableOpacity
+                  style={s.countItem}
+                  onPress={() => router.push({ pathname: "/friends", params: { tab: "followers" } })}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.countValue}>{followCounts.followers}</Text>
+                  <Text style={s.countLabel}>팔로워</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.countItem}
+                  onPress={() => router.push({ pathname: "/friends", params: { tab: "following" } })}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.countValue}>{followCounts.following}</Text>
+                  <Text style={s.countLabel}>팔로잉</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
 
           <View style={s.statsRow}>

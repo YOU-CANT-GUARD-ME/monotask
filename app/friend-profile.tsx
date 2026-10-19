@@ -19,13 +19,17 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ThemePalette } from "../constants/themes";
 import { useTheme } from "../contexts/ThemeContext";
 import { apiPost } from "../utils/api";
+import { followUser, unfollowUser } from "../utils/follow";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
 type FriendProfile = {
   displayName: string;
-  email: string;
   avatarInitials: string;
+  followersCount: number;
+  followingCount: number;
+  isFollowing: boolean;
+  isMe: boolean;
 };
 
 type FriendSession = {
@@ -296,30 +300,48 @@ export default function FriendProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedNote, setSelectedNote] = useState<FriendSession | null>(null);
+  const [followBusy, setFollowBusy] = useState(false);
+
+  async function toggleFollow() {
+    if (!profile || profile.isMe || followBusy || !uid) return;
+    setFollowBusy(true);
+    const nowFollowing = !profile.isFollowing;
+    try {
+      if (nowFollowing) await followUser(uid);
+      else await unfollowUser(uid);
+      setProfile({
+        ...profile,
+        isFollowing: nowFollowing,
+        followersCount: Math.max(0, profile.followersCount + (nowFollowing ? 1 : -1)),
+      });
+    } catch (e) {
+      console.warn("follow toggle failed:", e);
+    } finally {
+      setFollowBusy(false);
+    }
+  }
 
   const load = useCallback(async () => {
     if (!uid) return;
     setLoading(true);
     setError(null);
     try {
-      // The server checks you're friends and leaves out private notes.
+      // The server leaves out the notes of sessions that aren't public.
       const data = await apiPost<{
-        profile: { displayName: string; email: string };
+        profile: Omit<FriendProfile, "avatarInitials">;
         sessions: FriendSession[];
-      }>("/api/friend-profile", { uid });
-      const { displayName, email } = data.profile;
+      }>("/api/user-profile", { uid });
       setProfile({
-        displayName,
-        email,
-        avatarInitials: initialsOf(displayName),
+        ...data.profile,
+        avatarInitials: initialsOf(data.profile.displayName),
       });
 
       const list: FriendSession[] = data.sessions;
       list.sort((a, b) => b.startTime - a.startTime);
       setSessions(list);
     } catch (e) {
-      console.warn("failed to load friend profile:", e);
-      setError("친구 정보를 불러올 수 없습니다.");
+      console.warn("failed to load profile:", e);
+      setError("프로필을 불러올 수 없습니다.");
       setProfile(null);
       setSessions([]);
     } finally {
@@ -409,7 +431,26 @@ export default function FriendProfileScreen() {
       color: colors.text,
       marginBottom: rs(4),
     },
-    userEmail: { fontSize: rs(13), color: colors.textFaint },
+    countsRow: {
+      flexDirection: "row",
+      gap: rs(28),
+      marginTop: rs(10),
+      marginBottom: rs(16),
+    },
+    countItem: { alignItems: "center" },
+    countValue: { fontSize: rs(17), fontWeight: "800", color: colors.text },
+    countLabel: { fontSize: rs(12), color: colors.textFaint, marginTop: rs(2) },
+    followBtn: {
+      backgroundColor: colors.primary,
+      borderRadius: rs(14),
+      paddingVertical: rs(11),
+      paddingHorizontal: rs(36),
+      minWidth: rs(140),
+      alignItems: "center",
+    },
+    followBtnText: { color: colors.onPrimary, fontWeight: "800", fontSize: rs(14) },
+    followingBtn: { backgroundColor: colors.surface },
+    followingBtnText: { color: colors.text },
     statsRow: {
       flexDirection: "row",
       gap: rs(10),
@@ -457,7 +498,7 @@ export default function FriendProfileScreen() {
         <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
           <AppIcon name="chevron-back" size={rs(18)} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>친구 프로필</Text>
+        <Text style={s.headerTitle}>프로필</Text>
       </View>
 
       {loading ? (
@@ -466,7 +507,7 @@ export default function FriendProfileScreen() {
         </View>
       ) : error || !profile ? (
         <View style={s.centerFill}>
-          <Text style={s.emptyText}>{error ?? "친구 정보를 불러올 수 없습니다."}</Text>
+          <Text style={s.emptyText}>{error ?? "프로필을 불러올 수 없습니다."}</Text>
         </View>
       ) : (
         <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
@@ -475,7 +516,32 @@ export default function FriendProfileScreen() {
               <Text style={s.avatarText}>{profile.avatarInitials}</Text>
             </View>
             <Text style={s.userName}>{profile.displayName}</Text>
-            <Text style={s.userEmail}>{profile.email}</Text>
+            <View style={s.countsRow}>
+              <View style={s.countItem}>
+                <Text style={s.countValue}>{profile.followersCount}</Text>
+                <Text style={s.countLabel}>팔로워</Text>
+              </View>
+              <View style={s.countItem}>
+                <Text style={s.countValue}>{profile.followingCount}</Text>
+                <Text style={s.countLabel}>팔로잉</Text>
+              </View>
+            </View>
+            {!profile.isMe && (
+              <TouchableOpacity
+                style={[s.followBtn, profile.isFollowing && s.followingBtn]}
+                onPress={toggleFollow}
+                disabled={followBusy}
+                activeOpacity={0.85}
+              >
+                {followBusy ? (
+                  <ActivityIndicator size="small" color={profile.isFollowing ? colors.text : colors.onPrimary} />
+                ) : (
+                  <Text style={[s.followBtnText, profile.isFollowing && s.followingBtnText]}>
+                    {profile.isFollowing ? "팔로잉" : "팔로우"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            )}
           </View>
 
           <View style={s.statsRow}>
